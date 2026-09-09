@@ -1,8 +1,7 @@
 import type { Metadata } from 'next'
-import Link from 'next/link'
-import { Gem, LogOut } from 'lucide-react'
+import { Gem } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Button } from '@/components/ui/button'
+import { LogoutButton } from '@/components/logout-button'
 import { ProfileForm } from '@/components/profile/profile-form'
 import { currentCustomer } from '@/data/customer'
 import { getCurrentTier } from '@/data/loyalty'
@@ -39,10 +38,7 @@ export default function PerfilPage() {
             </span>
           </div>
         </div>
-        <Button variant="outline" render={<Link href="/" />} nativeButton={false}>
-          <LogOut className="size-4" />
-          Sair
-        </Button>
+        <LogoutButton variant="outline" />
       </div>
 
       <ProfileForm customer={currentCustomer} />
