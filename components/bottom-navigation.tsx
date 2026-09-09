@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutGrid, CalendarPlus, CalendarCheck, Gem, User } from 'lucide-react'
+import { LayoutGrid, CalendarPlus, CalendarCheck, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -17,7 +17,7 @@ export function BottomNavigation() {
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-card/95 backdrop-blur-sm lg:hidden">
-      <div className="grid grid-cols-5">
+      <div className="grid grid-cols-4">
         {navItems.map((item) => {
           const isActive = pathname === item.href
           const Icon = item.icon

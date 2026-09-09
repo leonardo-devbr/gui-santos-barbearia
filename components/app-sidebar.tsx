@@ -8,7 +8,6 @@ import {
   History,
   Scissors,
   Users,
-  Gem,
   User,
   Settings,
   LogOut,
