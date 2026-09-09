@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { Button } from '@/components/ui/button'
+import { getLoginHref } from '@/lib/navigation'
 
 export function Hero() {
   return (
@@ -24,13 +25,13 @@ export function Hero() {
         </h1>
         <p className="max-w-md text-lg text-muted-foreground">Seu estilo. Seu momento.</p>
         <div className="mt-4 flex flex-wrap gap-3">
-          <Button size="lg" render={<Link href="/app/agendar" />} nativeButton={false} className="h-12 px-6 text-base">
+          <Button size="lg" render={<Link href={getLoginHref('/app/agendar')} />} nativeButton={false} className="h-12 px-6 text-base">
             Agendar horário
           </Button>
           <Button
             size="lg"
             variant="outline"
-            render={<Link href="/app/servicos" />}
+            render={<Link href={getLoginHref('/app/servicos')} />}
             nativeButton={false}
             className="h-12 px-6 text-base"
           >

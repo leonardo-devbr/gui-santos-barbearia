@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { isValidEmail, normalizeEmail } from '@/lib/validation'
+import { getSafeAppPath } from '@/lib/navigation'
 
 type LoginField = 'email' | 'password'
 
@@ -85,7 +86,8 @@ export default function LoginPage() {
       }
 
       toast.success('Login realizado com sucesso.')
-      router.replace('/app')
+      const nextPath = getSafeAppPath(new URLSearchParams(window.location.search).get('next'))
+      router.replace(nextPath)
       router.refresh()
     } catch {
       setSubmitError('Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.')

@@ -3,6 +3,7 @@ import { Scissors, Sparkles, Layers, Eye, Wand2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { services } from '@/data/services'
 import { formatPrice } from '@/lib/format'
+import { getLoginHref } from '@/lib/navigation'
 
 const serviceIcons: Record<string, typeof Scissors> = {
   corte: Scissors,
@@ -43,7 +44,7 @@ export function ServicesSection() {
       </div>
 
       <div className="mt-10">
-        <Button variant="outline" render={<Link href="/app/servicos" />} nativeButton={false}>
+        <Button variant="outline" render={<Link href={getLoginHref('/app/servicos')} />} nativeButton={false}>
           Ver todos os serviços
         </Button>
       </div>

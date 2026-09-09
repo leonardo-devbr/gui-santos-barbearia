@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import { getLoginHref } from '@/lib/navigation'
 
 export function SiteHeader() {
   return (
@@ -18,7 +19,7 @@ export function SiteHeader() {
           >
             Entrar
           </Button>
-          <Button render={<Link href="/app/agendar" />} nativeButton={false}>
+          <Button render={<Link href={getLoginHref('/app/agendar')} />} nativeButton={false}>
             Agendar horário
           </Button>
         </div>

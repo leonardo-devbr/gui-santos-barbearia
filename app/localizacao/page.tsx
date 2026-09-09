@@ -5,6 +5,7 @@ import { SiteHeader } from '@/components/site-header'
 import { SiteFooter } from '@/components/site-footer'
 import { Button } from '@/components/ui/button'
 import { LocationMapLoader } from '@/components/location-map-loader'
+import { getLoginHref } from '@/lib/navigation'
 
 export const metadata: Metadata = {
   title: 'Localização | Gui Santos Barbearia',
@@ -98,7 +99,7 @@ export default function LocationPage() {
               </div>
             </div>
 
-            <Button size="lg" render={<Link href="/app/agendar" />} nativeButton={false}>
+            <Button size="lg" render={<Link href={getLoginHref('/app/agendar')} />} nativeButton={false}>
               Agendar horário
             </Button>
           </div>

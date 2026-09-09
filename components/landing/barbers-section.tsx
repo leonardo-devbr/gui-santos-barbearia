@@ -3,6 +3,7 @@ import Image from 'next/image'
 import { Star } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { barbers } from '@/data/barbers'
+import { getLoginHref } from '@/lib/navigation'
 
 export function BarbersSection() {
   return (
@@ -38,7 +39,7 @@ export function BarbersSection() {
       </div>
 
       <div className="mt-10">
-        <Button variant="outline" render={<Link href="/app/barbeiros" />} nativeButton={false}>
+        <Button variant="outline" render={<Link href={getLoginHref('/app/barbeiros')} />} nativeButton={false}>
           Conhecer a equipe
         </Button>
       </div>
