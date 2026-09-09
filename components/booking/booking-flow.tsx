@@ -221,6 +221,8 @@ export function BookingFlow({ appointmentId, initialServiceId, initialBarberId }
           <div key={label} className="flex flex-1 items-center gap-2">
             <div className="flex flex-col items-center gap-1.5">
               <div
+                aria-current={i === step ? 'step' : undefined}
+                aria-label={`${i + 1}. ${label}`}
                 className={cn(
                   'flex size-8 shrink-0 items-center justify-center rounded-full border text-xs font-medium transition-colors',
                   i < step && 'border-primary bg-primary text-primary-foreground',
@@ -228,7 +230,7 @@ export function BookingFlow({ appointmentId, initialServiceId, initialBarberId }
                   i > step && 'border-border text-muted-foreground',
                 )}
               >
-                {i < step ? <Check className="size-4" /> : i + 1}
+                {i < step ? <Check className="size-4" aria-hidden="true" /> : i + 1}
               </div>
               <span
                 className={cn(
@@ -289,6 +291,7 @@ export function BookingFlow({ appointmentId, initialServiceId, initialBarberId }
                 <button
                   key={d.iso}
                   type="button"
+                  aria-pressed={date === d.iso}
                   onClick={() => selectDate(d.iso)}
                   className={cn(
                     'flex flex-col items-center gap-1 rounded-xl border p-3 transition-colors',

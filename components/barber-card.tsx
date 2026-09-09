@@ -20,11 +20,15 @@ export function BarberCard({ barber, selected, onSelect, compact, showRating = t
     <Card
       role={interactive ? 'button' : undefined}
       tabIndex={interactive ? 0 : undefined}
+      aria-pressed={interactive ? Boolean(selected) : undefined}
       onClick={onSelect}
       onKeyDown={
         interactive
           ? (e) => {
-              if (e.key === 'Enter' || e.key === ' ') onSelect?.()
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onSelect?.()
+              }
             }
           : undefined
       }

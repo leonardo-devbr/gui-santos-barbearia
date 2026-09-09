@@ -16,7 +16,7 @@ export function BottomNavigation() {
   const pathname = usePathname()
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-card/95 backdrop-blur-sm lg:hidden">
+    <nav aria-label="Navegação principal" className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-card/95 backdrop-blur-sm lg:hidden">
       <div className="grid grid-cols-4">
         {navItems.map((item) => {
           const isActive = pathname === item.href
@@ -25,6 +25,7 @@ export function BottomNavigation() {
             <Link
               key={item.href}
               href={item.href}
+              aria-current={isActive ? 'page' : undefined}
               className={cn(
                 'flex flex-col items-center gap-1 py-3 text-[11px] transition-colors',
                 isActive ? 'text-primary' : 'text-muted-foreground',

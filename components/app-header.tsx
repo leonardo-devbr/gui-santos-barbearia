@@ -9,7 +9,7 @@ export function AppHeader({ title }: { title: string }) {
         <span className="text-[10px] font-medium tracking-[0.2em] text-primary">GUI SANTOS BARBEARIA</span>
         <h1 className="font-serif text-lg text-foreground">{title}</h1>
       </div>
-      <Link href="/app/perfil">
+      <Link href="/app/perfil" aria-label="Abrir meu perfil">
         <Avatar className="size-9 border border-border">
           <AvatarImage src={currentCustomer.photoUrl || '/placeholder.svg'} alt={currentCustomer.name} />
           <AvatarFallback>{currentCustomer.name.charAt(0)}</AvatarFallback>

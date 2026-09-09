@@ -35,7 +35,7 @@ export function AppSidebar() {
         <span className="text-xs font-medium tracking-[0.2em] text-primary">BARBEARIA</span>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1 px-3">
+      <nav aria-label="Área do cliente" className="flex flex-1 flex-col gap-1 px-3">
         {navItems.map((item) => {
           const isActive = pathname === item.href
           const Icon = item.icon
@@ -43,6 +43,7 @@ export function AppSidebar() {
             <Link
               key={item.href}
               href={item.href}
+              aria-current={isActive ? 'page' : undefined}
               className={cn(
                 'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors',
                 isActive
