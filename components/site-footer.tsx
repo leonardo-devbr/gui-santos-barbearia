@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { MapPin, Phone, Clock, Mail } from "lucide-react"
+import { MapPin, Phone, Clock } from "lucide-react"
 
 export function SiteFooter() {
   return (
@@ -14,11 +14,6 @@ export function SiteFooter() {
               Tradição e precisão em cada corte. Uma experiência de barbearia
               feita para quem exige o melhor.
             </p>
-            <div className="flex items-center gap-2 pt-1 text-sm text-muted-foreground">
-              <Instagram className="size-4 text-primary" />
-              a
-              <span></span>
-            </div>
           </div>
 
           <div className="flex flex-col gap-3">
