@@ -11,6 +11,10 @@ interface BookAgainCardProps {
 
 export function BookAgainCard({ lastAppointment }: BookAgainCardProps) {
   const service = getServiceById(lastAppointment.serviceId)
+  const bookingParams = new URLSearchParams({
+    servico: lastAppointment.serviceId,
+    barbeiro: lastAppointment.barberId,
+  })
 
   return (
     <div className="flex flex-col items-start justify-between gap-4 rounded-xl border border-border bg-card p-6 sm:flex-row sm:items-center">
@@ -28,7 +32,11 @@ export function BookAgainCard({ lastAppointment }: BookAgainCardProps) {
           </span>
         </div>
       </div>
-      <Button render={<Link href="/app/agendar" />} nativeButton={false} className="w-full sm:w-auto">
+      <Button
+        render={<Link href={`/app/agendar?${bookingParams.toString()}`} />}
+        nativeButton={false}
+        className="w-full sm:w-auto"
+      >
         Agendar novamente
       </Button>
     </div>

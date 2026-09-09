@@ -13,6 +13,11 @@ interface NextAppointmentCardProps {
 export function NextAppointmentCard({ appointment }: NextAppointmentCardProps) {
   const service = getServiceById(appointment.serviceId)
   const barber = getBarberById(appointment.barberId)
+  const rescheduleParams = new URLSearchParams({
+    agendamento: appointment.id,
+    servico: appointment.serviceId,
+    barbeiro: appointment.barberId,
+  })
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-card to-card/60 p-6 sm:p-8">
@@ -47,7 +52,11 @@ export function NextAppointmentCard({ appointment }: NextAppointmentCardProps) {
           <Button render={<Link href="/app/agendamentos" />} nativeButton={false}>
             Ver agendamento
           </Button>
-          <Button variant="outline" render={<Link href="/app/agendar" />} nativeButton={false}>
+          <Button
+            variant="outline"
+            render={<Link href={`/app/agendar?${rescheduleParams.toString()}`} />}
+            nativeButton={false}
+          >
             Remarcar
           </Button>
         </div>
