@@ -1,5 +1,5 @@
 // Tipos centrais do domínio. Organizados para facilitar a futura substituição
-// por respostas de uma API REST (Spring Boot + PostgreSQL).
+// por respostas da API conectada ao MySQL.
 
 export interface Service {
   id: string
