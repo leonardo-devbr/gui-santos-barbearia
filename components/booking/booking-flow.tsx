@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, ChevronLeft, CalendarDays, Clock, Scissors, User } from 'lucide-react'
+import { Check, ChevronLeft, CalendarDays, Clock, LoaderCircle, Scissors, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -44,15 +44,23 @@ interface BookingFlowProps {
   initialBarberId?: string
 }
 
+interface BookingResponse {
+  message?: string
+}
+
 export function BookingFlow({ initialServiceId, initialBarberId }: BookingFlowProps) {
   const router = useRouter()
   const days = useMemo(() => getNextDays(12), [])
+  const validInitialServiceId = initialServiceId && getServiceById(initialServiceId) ? initialServiceId : undefined
+  const validInitialBarberId = initialBarberId && getBarberById(initialBarberId) ? initialBarberId : undefined
 
   const [step, setStep] = useState(0)
-  const [serviceId, setServiceId] = useState<string | undefined>(initialServiceId)
-  const [barberId, setBarberId] = useState<string | undefined>(initialBarberId)
+  const [serviceId, setServiceId] = useState<string | undefined>(validInitialServiceId)
+  const [barberId, setBarberId] = useState<string | undefined>(validInitialBarberId)
   const [date, setDate] = useState<string | undefined>()
   const [time, setTime] = useState<string | undefined>()
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const service = serviceId ? getServiceById(serviceId) : undefined
   const barber = barberId ? getBarberById(barberId) : undefined
@@ -65,24 +73,75 @@ export function BookingFlow({ initialServiceId, initialBarberId }: BookingFlowPr
     step === 4
 
   function next() {
-    if (step < steps.length - 1) setStep((s) => s + 1)
+    if (canAdvance && step < steps.length - 1) setStep((s) => s + 1)
   }
+
   function back() {
     if (step > 0) setStep((s) => s - 1)
     else router.back()
   }
 
-  function confirm() {
-    toast.success('Agendamento confirmado!', {
-      description: `${service?.name} com ${barber?.name.split(' ')[0]} em ${
-        date ? formatDateLong(date) : ''
-      } às ${time}.`,
-    })
-    router.push('/app/agendamentos')
+  function selectService(nextServiceId: string) {
+    if (nextServiceId === serviceId) return
+    setServiceId(nextServiceId)
+    setBarberId(undefined)
+    setDate(undefined)
+    setTime(undefined)
+    setSubmitError(null)
+  }
+
+  function selectBarber(nextBarberId: string) {
+    if (nextBarberId === barberId) return
+    setBarberId(nextBarberId)
+    setDate(undefined)
+    setTime(undefined)
+    setSubmitError(null)
+  }
+
+  function selectDate(nextDate: string) {
+    if (nextDate === date) return
+    setDate(nextDate)
+    setTime(undefined)
+    setSubmitError(null)
+  }
+
+  async function confirm() {
+    if (!serviceId || !barberId || !date || !time || !service || !barber) {
+      setSubmitError('O agendamento está incompleto. Revise as etapas anteriores.')
+      return
+    }
+
+    setSubmitError(null)
+    setIsSubmitting(true)
+
+    try {
+      const response = await fetch('/api/appointments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ serviceId, barberId, date, time }),
+      })
+      const result = (await response.json().catch(() => null)) as BookingResponse | null
+
+      if (!response.ok) {
+        setSubmitError(result?.message ?? 'Não foi possível confirmar o agendamento. Tente outro horário.')
+        return
+      }
+
+      toast.success('Agendamento confirmado!', {
+        description: `${service.name} com ${barber.name.split(' ')[0]} em ${formatDateLong(date)} às ${time}.`,
+      })
+      router.push('/app/agendamentos')
+      router.refresh()
+    } catch {
+      setSubmitError('Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-8" aria-busy={isSubmitting}>
       {/* Stepper */}
       <div className="flex items-center gap-2">
         {steps.map((label, i) => (
@@ -125,7 +184,7 @@ export function BookingFlow({ initialServiceId, initialBarberId }: BookingFlowPr
                   key={s.id}
                   service={s}
                   selected={serviceId === s.id}
-                  onSelect={() => setServiceId(s.id)}
+                  onSelect={() => selectService(s.id)}
                 />
               ))}
             </div>
@@ -142,7 +201,7 @@ export function BookingFlow({ initialServiceId, initialBarberId }: BookingFlowPr
                   barber={b}
                   compact
                   selected={barberId === b.id}
-                  onSelect={() => setBarberId(b.id)}
+                  onSelect={() => selectBarber(b.id)}
                 />
               ))}
             </div>
@@ -157,7 +216,7 @@ export function BookingFlow({ initialServiceId, initialBarberId }: BookingFlowPr
                 <button
                   key={d.iso}
                   type="button"
-                  onClick={() => setDate(d.iso)}
+                  onClick={() => selectDate(d.iso)}
                   className={cn(
                     'flex flex-col items-center gap-1 rounded-xl border p-3 transition-colors',
                     date === d.iso
@@ -183,7 +242,10 @@ export function BookingFlow({ initialServiceId, initialBarberId }: BookingFlowPr
                   key={slot.time}
                   type="button"
                   disabled={!slot.available}
-                  onClick={() => setTime(slot.time)}
+                  onClick={() => {
+                    setTime(slot.time)
+                    setSubmitError(null)
+                  }}
                   className={cn(
                     'rounded-lg border py-3 text-sm font-medium transition-colors',
                     !slot.available && 'cursor-not-allowed border-border/50 text-muted-foreground/40 line-through',
@@ -230,8 +292,14 @@ export function BookingFlow({ initialServiceId, initialBarberId }: BookingFlowPr
       </div>
 
       {/* Navigation */}
+      {submitError && (
+        <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {submitError}
+        </p>
+      )}
+
       <div className="flex items-center justify-between gap-3">
-        <Button variant="ghost" onClick={back}>
+        <Button variant="ghost" onClick={back} disabled={isSubmitting}>
           <ChevronLeft className="size-4" />
           {step === 0 ? 'Voltar' : 'Anterior'}
         </Button>
@@ -240,7 +308,10 @@ export function BookingFlow({ initialServiceId, initialBarberId }: BookingFlowPr
             Continuar
           </Button>
         ) : (
-          <Button onClick={confirm}>Confirmar agendamento</Button>
+          <Button onClick={confirm} disabled={isSubmitting}>
+            {isSubmitting && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+            {isSubmitting ? 'Confirmando...' : 'Confirmar agendamento'}
+          </Button>
         )}
       </div>
     </div>
