@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { CheckCircle2, KeyRound, LoaderCircle } from 'lucide-react'
 import { AuthShell } from '@/components/auth-shell'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { getPasswordError, MAX_PASSWORD_LENGTH } from '@/lib/validation'
 
@@ -145,10 +145,9 @@ export function ResetPasswordForm({ token }: { token?: string }) {
         <FieldGroup>
           <Field data-invalid={Boolean(errors.password)}>
             <FieldLabel htmlFor="new-password">Nova senha</FieldLabel>
-            <Input
+            <PasswordInput
               id="new-password"
               name="password"
-              type="password"
               autoComplete="new-password"
               minLength={8}
               maxLength={MAX_PASSWORD_LENGTH}
@@ -166,10 +165,9 @@ export function ResetPasswordForm({ token }: { token?: string }) {
           </Field>
           <Field data-invalid={Boolean(errors.passwordConfirmation)}>
             <FieldLabel htmlFor="new-password-confirmation">Confirmar nova senha</FieldLabel>
-            <Input
+            <PasswordInput
               id="new-password-confirmation"
               name="passwordConfirmation"
-              type="password"
               autoComplete="new-password"
               minLength={8}
               maxLength={MAX_PASSWORD_LENGTH}

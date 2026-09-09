@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { AuthShell } from '@/components/auth-shell'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import {
   formatPhone,
@@ -187,10 +188,9 @@ export default function SignupPage() {
           </Field>
           <Field data-invalid={Boolean(errors.password)}>
             <FieldLabel htmlFor="password">Senha</FieldLabel>
-            <Input
+            <PasswordInput
               id="password"
               name="password"
-              type="password"
               autoComplete="new-password"
               placeholder="••••••••"
               minLength={8}
@@ -209,10 +209,9 @@ export default function SignupPage() {
           </Field>
           <Field data-invalid={Boolean(errors.passwordConfirmation)}>
             <FieldLabel htmlFor="passwordConfirmation">Confirmar senha</FieldLabel>
-            <Input
+            <PasswordInput
               id="passwordConfirmation"
               name="passwordConfirmation"
-              type="password"
               autoComplete="new-password"
               placeholder="Digite a senha novamente"
               minLength={8}

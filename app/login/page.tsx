@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { AuthShell } from '@/components/auth-shell'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { isValidEmail, normalizeEmail } from '@/lib/validation'
 
@@ -128,10 +129,9 @@ export default function LoginPage() {
                 Esqueceu a senha?
               </Link>
             </div>
-            <Input
+            <PasswordInput
               id="password"
               name="password"
-              type="password"
               autoComplete="current-password"
               placeholder="••••••••"
               aria-invalid={Boolean(errors.password)}
