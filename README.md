@@ -25,7 +25,7 @@ Antes de publicar uma mudança, execute:
 
 ```bash
 npm run lint
-npx tsc --noEmit --incremental false
+npm run typecheck
 npm run build
 ```
 

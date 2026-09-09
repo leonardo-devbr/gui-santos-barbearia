@@ -20,7 +20,6 @@ export const metadata: Metadata = {
   title: 'Gui Santos Barbearia',
   description:
     'Portal do cliente da Gui Santos Barbearia. Agende seu horário, acompanhe seus atendimentos e aproveite o programa de fidelidade.',
-  generator: 'v0.app',
   icons: {
     icon: [
       {
