@@ -7,12 +7,11 @@ import { AuthShell } from '@/components/auth-shell'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { isValidEmail, normalizeEmail } from '@/lib/validation'
 
 interface RecoveryResponse {
   message?: string
 }
-
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export default function RecoverPasswordPage() {
   const [emailError, setEmailError] = useState<string | null>(null)
@@ -23,9 +22,9 @@ export default function RecoverPasswordPage() {
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    const email = String(new FormData(event.currentTarget).get('email') ?? '').trim().toLowerCase()
+    const email = normalizeEmail(String(new FormData(event.currentTarget).get('email') ?? ''))
 
-    if (!emailPattern.test(email)) {
+    if (!isValidEmail(email)) {
       setEmailError('Informe um e-mail válido.')
       setSubmitError(null)
       return

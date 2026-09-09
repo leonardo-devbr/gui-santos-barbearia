@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import type { CustomerProfile } from '@/lib/types'
+import { formatPhone, isValidEmail, normalizeEmail, normalizePhone } from '@/lib/validation'
 
 type ProfileField = 'name' | 'phone' | 'email' | 'birthDate' | 'preferredCut' | 'beardStyle' | 'notes'
 
@@ -18,21 +19,6 @@ type ProfileErrors = Partial<Record<ProfileField, string>>
 interface ProfileResponse {
   message?: string
   errors?: ProfileErrors
-}
-
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-function formatPhone(value: string) {
-  const digits = value.replace(/\D/g, '').slice(0, 11)
-
-  if (digits.length === 0) return ''
-  if (digits.length <= 2) return `(${digits}`
-  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`
-  if (digits.length <= 10) {
-    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`
-  }
-
-  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`
 }
 
 export function ProfileForm({ customer }: { customer: CustomerProfile }) {
@@ -64,14 +50,14 @@ export function ProfileForm({ customer }: { customer: CustomerProfile }) {
 
   function validate() {
     const validationErrors: ProfileErrors = {}
-    const phoneDigits = form.phone.replace(/\D/g, '')
+    const phoneDigits = normalizePhone(form.phone)
     const today = new Date().toISOString().slice(0, 10)
 
     if (form.name.trim().length < 3) validationErrors.name = 'Informe seu nome completo.'
     if (phoneDigits.length < 10 || phoneDigits.length > 11) {
       validationErrors.phone = 'Informe um telefone com DDD.'
     }
-    if (!emailPattern.test(form.email.trim())) validationErrors.email = 'Informe um e-mail válido.'
+    if (!isValidEmail(form.email)) validationErrors.email = 'Informe um e-mail válido.'
     if (form.birthDate && form.birthDate > today) {
       validationErrors.birthDate = 'A data de nascimento não pode estar no futuro.'
     }
@@ -108,8 +94,8 @@ export function ProfileForm({ customer }: { customer: CustomerProfile }) {
         body: JSON.stringify({
           ...form,
           name: form.name.trim().replace(/\s+/g, ' '),
-          phone: form.phone.replace(/\D/g, ''),
-          email: form.email.trim().toLowerCase(),
+          phone: normalizePhone(form.phone),
+          email: normalizeEmail(form.email),
           preferredCut: form.preferredCut.trim(),
           beardStyle: form.beardStyle.trim(),
           notes: form.notes.trim(),

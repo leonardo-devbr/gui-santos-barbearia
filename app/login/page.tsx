@@ -9,6 +9,7 @@ import { AuthShell } from '@/components/auth-shell'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { isValidEmail, normalizeEmail } from '@/lib/validation'
 
 type LoginField = 'email' | 'password'
 
@@ -19,14 +20,12 @@ interface LoginResponse {
   errors?: LoginErrors
 }
 
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
 function validateLogin(formData: FormData) {
-  const email = String(formData.get('email') ?? '').trim().toLowerCase()
+  const email = normalizeEmail(String(formData.get('email') ?? ''))
   const password = String(formData.get('password') ?? '')
   const errors: LoginErrors = {}
 
-  if (!emailPattern.test(email)) {
+  if (!isValidEmail(email)) {
     errors.email = 'Informe um e-mail válido.'
   }
 

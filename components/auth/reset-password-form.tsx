@@ -7,6 +7,7 @@ import { AuthShell } from '@/components/auth-shell'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { getPasswordError, MAX_PASSWORD_LENGTH } from '@/lib/validation'
 
 type ResetPasswordField = 'password' | 'passwordConfirmation'
 type ResetPasswordErrors = Partial<Record<ResetPasswordField, string>>
@@ -21,9 +22,8 @@ function validatePasswords(formData: FormData) {
   const passwordConfirmation = String(formData.get('passwordConfirmation') ?? '')
   const errors: ResetPasswordErrors = {}
 
-  if (password.length < 8 || !/[A-Za-zÀ-ÿ]/.test(password) || !/\d/.test(password)) {
-    errors.password = 'Use ao menos 8 caracteres, incluindo uma letra e um número.'
-  }
+  const passwordError = getPasswordError(password)
+  if (passwordError) errors.password = passwordError
 
   if (!passwordConfirmation) {
     errors.passwordConfirmation = 'Confirme sua nova senha.'
@@ -151,7 +151,7 @@ export function ResetPasswordForm({ token }: { token?: string }) {
               type="password"
               autoComplete="new-password"
               minLength={8}
-              maxLength={128}
+              maxLength={MAX_PASSWORD_LENGTH}
               aria-invalid={Boolean(errors.password)}
               aria-describedby={errors.password ? 'new-password-error' : 'new-password-description'}
               onValueChange={() => clearError('password')}
@@ -172,7 +172,7 @@ export function ResetPasswordForm({ token }: { token?: string }) {
               type="password"
               autoComplete="new-password"
               minLength={8}
-              maxLength={128}
+              maxLength={MAX_PASSWORD_LENGTH}
               aria-invalid={Boolean(errors.passwordConfirmation)}
               aria-describedby={errors.passwordConfirmation ? 'new-password-confirmation-error' : undefined}
               onValueChange={() => clearError('passwordConfirmation')}

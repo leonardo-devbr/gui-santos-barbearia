@@ -10,6 +10,14 @@ import { AuthShell } from '@/components/auth-shell'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
+import {
+  formatPhone,
+  getPasswordError,
+  isValidEmail,
+  MAX_PASSWORD_LENGTH,
+  normalizeEmail,
+  normalizePhone,
+} from '@/lib/validation'
 
 type SignupField = 'name' | 'phone' | 'email' | 'password' | 'passwordConfirmation'
 
@@ -20,25 +28,10 @@ interface SignupResponse {
   errors?: SignupErrors
 }
 
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-function formatPhone(value: string) {
-  const digits = value.replace(/\D/g, '').slice(0, 11)
-
-  if (digits.length === 0) return ''
-  if (digits.length <= 2) return `(${digits}`
-  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`
-  if (digits.length <= 10) {
-    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`
-  }
-
-  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`
-}
-
 function validateSignup(formData: FormData) {
   const name = String(formData.get('name') ?? '').trim().replace(/\s+/g, ' ')
-  const phone = String(formData.get('phone') ?? '').replace(/\D/g, '')
-  const email = String(formData.get('email') ?? '').trim().toLowerCase()
+  const phone = normalizePhone(String(formData.get('phone') ?? ''))
+  const email = normalizeEmail(String(formData.get('email') ?? ''))
   const password = String(formData.get('password') ?? '')
   const passwordConfirmation = String(formData.get('passwordConfirmation') ?? '')
   const errors: SignupErrors = {}
@@ -53,13 +46,12 @@ function validateSignup(formData: FormData) {
     errors.phone = 'Informe um telefone com DDD.'
   }
 
-  if (!emailPattern.test(email)) {
+  if (!isValidEmail(email)) {
     errors.email = 'Informe um e-mail válido.'
   }
 
-  if (password.length < 8 || !/[A-Za-zÀ-ÿ]/.test(password) || !/\d/.test(password)) {
-    errors.password = 'Use ao menos 8 caracteres, incluindo uma letra e um número.'
-  }
+  const passwordError = getPasswordError(password)
+  if (passwordError) errors.password = passwordError
 
   if (!passwordConfirmation) {
     errors.passwordConfirmation = 'Confirme sua senha.'
@@ -202,6 +194,7 @@ export default function SignupPage() {
               autoComplete="new-password"
               placeholder="••••••••"
               minLength={8}
+              maxLength={MAX_PASSWORD_LENGTH}
               aria-invalid={Boolean(errors.password)}
               aria-describedby={errors.password ? 'password-error' : 'password-description'}
               onChange={() => clearError('password')}
@@ -223,6 +216,7 @@ export default function SignupPage() {
               autoComplete="new-password"
               placeholder="Digite a senha novamente"
               minLength={8}
+              maxLength={MAX_PASSWORD_LENGTH}
               aria-invalid={Boolean(errors.passwordConfirmation)}
               aria-describedby={errors.passwordConfirmation ? 'password-confirmation-error' : undefined}
               onChange={() => clearError('passwordConfirmation')}
