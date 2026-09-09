@@ -40,6 +40,7 @@ function getNextDays(count: number) {
 }
 
 interface BookingFlowProps {
+  appointmentId?: string
   initialServiceId?: string
   initialBarberId?: string
 }
@@ -48,9 +49,10 @@ interface BookingResponse {
   message?: string
 }
 
-export function BookingFlow({ initialServiceId, initialBarberId }: BookingFlowProps) {
+export function BookingFlow({ appointmentId, initialServiceId, initialBarberId }: BookingFlowProps) {
   const router = useRouter()
   const days = useMemo(() => getNextDays(12), [])
+  const isRescheduling = Boolean(appointmentId)
   const validInitialServiceId = initialServiceId && getServiceById(initialServiceId) ? initialServiceId : undefined
   const validInitialBarberId = initialBarberId && getBarberById(initialBarberId) ? initialBarberId : undefined
 
@@ -115,8 +117,11 @@ export function BookingFlow({ initialServiceId, initialBarberId }: BookingFlowPr
     setIsSubmitting(true)
 
     try {
-      const response = await fetch('/api/appointments', {
-        method: 'POST',
+      const endpoint = appointmentId
+        ? `/api/appointments/${encodeURIComponent(appointmentId)}`
+        : '/api/appointments'
+      const response = await fetch(endpoint, {
+        method: appointmentId ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ serviceId, barberId, date, time }),
@@ -128,7 +133,7 @@ export function BookingFlow({ initialServiceId, initialBarberId }: BookingFlowPr
         return
       }
 
-      toast.success('Agendamento confirmado!', {
+      toast.success(isRescheduling ? 'Agendamento remarcado!' : 'Agendamento confirmado!', {
         description: `${service.name} com ${barber.name.split(' ')[0]} em ${formatDateLong(date)} às ${time}.`,
       })
       router.push('/app/agendamentos')
@@ -266,7 +271,9 @@ export function BookingFlow({ initialServiceId, initialBarberId }: BookingFlowPr
 
         {step === 4 && (
           <>
-            <h2 className="font-serif text-2xl text-foreground">Confirme o agendamento</h2>
+            <h2 className="font-serif text-2xl text-foreground">
+              {isRescheduling ? 'Confirme a remarcação' : 'Confirme o agendamento'}
+            </h2>
             <Card>
               <CardContent className="flex flex-col gap-4">
                 <SummaryRow icon={Scissors} label="Serviço" value={service?.name ?? '-'} />
@@ -310,7 +317,13 @@ export function BookingFlow({ initialServiceId, initialBarberId }: BookingFlowPr
         ) : (
           <Button onClick={confirm} disabled={isSubmitting}>
             {isSubmitting && <LoaderCircle className="animate-spin" aria-hidden="true" />}
-            {isSubmitting ? 'Confirmando...' : 'Confirmar agendamento'}
+            {isSubmitting
+              ? isRescheduling
+                ? 'Remarcando...'
+                : 'Confirmando...'
+              : isRescheduling
+                ? 'Confirmar remarcação'
+                : 'Confirmar agendamento'}
           </Button>
         )}
       </div>

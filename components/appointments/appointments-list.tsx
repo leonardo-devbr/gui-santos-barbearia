@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { CalendarPlus } from 'lucide-react'
+import { CalendarPlus, LoaderCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { AppointmentCard } from '@/components/appointment-card'
 import { Button } from '@/components/ui/button'
@@ -28,23 +28,61 @@ import {
 import { getServiceById } from '@/data/services'
 import type { Appointment } from '@/lib/types'
 
+interface AppointmentResponse {
+  message?: string
+}
+
 export function AppointmentsList({ initial }: { initial: Appointment[] }) {
   const router = useRouter()
   const [appointments, setAppointments] = useState(initial)
   const [toCancel, setToCancel] = useState<Appointment | null>(null)
+  const [cancelError, setCancelError] = useState<string | null>(null)
+  const [isCancelling, setIsCancelling] = useState(false)
 
   function handleReschedule(appointment: Appointment) {
-    router.push(`/app/agendar?servico=${appointment.serviceId}&barbeiro=${appointment.barberId}`)
+    const params = new URLSearchParams({
+      agendamento: appointment.id,
+      servico: appointment.serviceId,
+      barbeiro: appointment.barberId,
+    })
+    router.push(`/app/agendar?${params.toString()}`)
   }
 
-  function confirmCancel() {
+  function openCancelDialog(appointment: Appointment) {
+    setCancelError(null)
+    setToCancel(appointment)
+  }
+
+  async function confirmCancel() {
     if (!toCancel) return
-    const service = getServiceById(toCancel.serviceId)
-    setAppointments((prev) => prev.filter((a) => a.id !== toCancel.id))
-    toast.success('Agendamento cancelado', {
-      description: `${service?.name ?? 'Serviço'} foi cancelado.`,
-    })
-    setToCancel(null)
+
+    setCancelError(null)
+    setIsCancelling(true)
+
+    try {
+      const response = await fetch(`/api/appointments/${encodeURIComponent(toCancel.id)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      const result = (await response.json().catch(() => null)) as AppointmentResponse | null
+
+      if (!response.ok) {
+        setCancelError(result?.message ?? 'Não foi possível cancelar o agendamento. Tente novamente.')
+        return
+      }
+
+      const service = getServiceById(toCancel.serviceId)
+      setAppointments((previous) => previous.filter((appointment) => appointment.id !== toCancel.id))
+      toast.success('Agendamento cancelado', {
+        description: `${service?.name ?? 'Serviço'} foi cancelado.`,
+      })
+      setToCancel(null)
+      router.refresh()
+    } catch {
+      setCancelError('Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.')
+    } finally {
+      setIsCancelling(false)
+    }
   }
 
   if (appointments.length === 0) {
@@ -74,22 +112,38 @@ export function AppointmentsList({ initial }: { initial: Appointment[] }) {
             key={appointment.id}
             appointment={appointment}
             onReschedule={() => handleReschedule(appointment)}
-            onCancel={() => setToCancel(appointment)}
+            onCancel={() => openCancelDialog(appointment)}
           />
         ))}
       </div>
 
-      <AlertDialog open={Boolean(toCancel)} onOpenChange={(open) => !open && setToCancel(null)}>
+      <AlertDialog
+        open={Boolean(toCancel)}
+        onOpenChange={(open) => {
+          if (!open && !isCancelling) {
+            setCancelError(null)
+            setToCancel(null)
+          }
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Cancelar agendamento?</AlertDialogTitle>
             <AlertDialogDescription>
               Esta ação não pode ser desfeita. Você poderá agendar um novo horário depois.
             </AlertDialogDescription>
+            {cancelError && (
+              <p role="alert" className="pt-2 text-sm text-destructive">
+                {cancelError}
+              </p>
+            )}
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Voltar</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmCancel}>Cancelar agendamento</AlertDialogAction>
+            <AlertDialogCancel disabled={isCancelling}>Voltar</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmCancel} disabled={isCancelling}>
+              {isCancelling && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+              {isCancelling ? 'Cancelando...' : 'Cancelar agendamento'}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
