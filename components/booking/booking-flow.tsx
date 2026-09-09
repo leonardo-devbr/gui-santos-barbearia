@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, ChevronLeft, CalendarDays, Clock, LoaderCircle, Scissors, User } from 'lucide-react'
 import { toast } from 'sonner'
@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils'
 import { formatDateLong, formatPrice } from '@/lib/format'
 import { services, getServiceById } from '@/data/services'
 import { barbers, getBarberById } from '@/data/barbers'
-import { mockTimeSlots } from '@/data/appointments'
+import type { TimeSlot } from '@/lib/types'
 
 const steps = ['Serviço', 'Barbeiro', 'Data', 'Horário', 'Confirmar'] as const
 
@@ -49,6 +49,22 @@ interface BookingResponse {
   message?: string
 }
 
+interface AvailabilityResponse {
+  message?: string
+  slots?: unknown
+}
+
+function isTimeSlot(value: unknown): value is TimeSlot {
+  if (!value || typeof value !== 'object') return false
+
+  const slot = value as Partial<TimeSlot>
+  return (
+    typeof slot.time === 'string' &&
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(slot.time) &&
+    typeof slot.available === 'boolean'
+  )
+}
+
 export function BookingFlow({ appointmentId, initialServiceId, initialBarberId }: BookingFlowProps) {
   const router = useRouter()
   const days = useMemo(() => getNextDays(12), [])
@@ -61,8 +77,12 @@ export function BookingFlow({ appointmentId, initialServiceId, initialBarberId }
   const [barberId, setBarberId] = useState<string | undefined>(validInitialBarberId)
   const [date, setDate] = useState<string | undefined>()
   const [time, setTime] = useState<string | undefined>()
+  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([])
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null)
+  const [isLoadingSlots, setIsLoadingSlots] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const availabilityRequestId = useRef(0)
 
   const service = serviceId ? getServiceById(serviceId) : undefined
   const barber = barberId ? getBarberById(barberId) : undefined
@@ -89,6 +109,10 @@ export function BookingFlow({ appointmentId, initialServiceId, initialBarberId }
     setBarberId(undefined)
     setDate(undefined)
     setTime(undefined)
+    setTimeSlots([])
+    setAvailabilityError(null)
+    setIsLoadingSlots(false)
+    availabilityRequestId.current += 1
     setSubmitError(null)
   }
 
@@ -97,14 +121,58 @@ export function BookingFlow({ appointmentId, initialServiceId, initialBarberId }
     setBarberId(nextBarberId)
     setDate(undefined)
     setTime(undefined)
+    setTimeSlots([])
+    setAvailabilityError(null)
+    setIsLoadingSlots(false)
+    availabilityRequestId.current += 1
     setSubmitError(null)
   }
 
+  async function loadAvailability(selectedDate: string) {
+    if (!serviceId || !barberId) return
+
+    const requestId = availabilityRequestId.current + 1
+    availabilityRequestId.current = requestId
+    setTimeSlots([])
+    setAvailabilityError(null)
+    setIsLoadingSlots(true)
+
+    const params = new URLSearchParams({ serviceId, barberId, date: selectedDate })
+
+    try {
+      const response = await fetch(`/api/availability?${params.toString()}`, {
+        credentials: 'include',
+      })
+      const result = (await response.json().catch(() => null)) as AvailabilityResponse | null
+
+      if (requestId !== availabilityRequestId.current) return
+
+      if (!response.ok) {
+        setAvailabilityError(result?.message ?? 'Não foi possível consultar os horários disponíveis.')
+        return
+      }
+
+      if (!Array.isArray(result?.slots) || !result.slots.every(isTimeSlot)) {
+        setAvailabilityError('O servidor retornou uma lista de horários inválida.')
+        return
+      }
+
+      setTimeSlots(result.slots)
+    } catch {
+      if (requestId === availabilityRequestId.current) {
+        setAvailabilityError('Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.')
+      }
+    } finally {
+      if (requestId === availabilityRequestId.current) setIsLoadingSlots(false)
+    }
+  }
+
   function selectDate(nextDate: string) {
-    if (nextDate === date) return
+    if (nextDate === date && (isLoadingSlots || timeSlots.length > 0)) return
     setDate(nextDate)
     setTime(undefined)
     setSubmitError(null)
+    void loadAvailability(nextDate)
   }
 
   async function confirm() {
@@ -241,31 +309,50 @@ export function BookingFlow({ appointmentId, initialServiceId, initialBarberId }
         {step === 3 && (
           <>
             <h2 className="font-serif text-2xl text-foreground">Escolha o horário</h2>
-            <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-              {mockTimeSlots.map((slot) => (
-                <button
-                  key={slot.time}
-                  type="button"
-                  disabled={!slot.available}
-                  onClick={() => {
-                    setTime(slot.time)
-                    setSubmitError(null)
-                  }}
-                  className={cn(
-                    'rounded-lg border py-3 text-sm font-medium transition-colors',
-                    !slot.available && 'cursor-not-allowed border-border/50 text-muted-foreground/40 line-through',
-                    slot.available &&
-                      time === slot.time &&
-                      'border-primary bg-primary/10 text-foreground',
-                    slot.available &&
-                      time !== slot.time &&
-                      'border-border bg-card text-foreground hover:border-primary/50',
-                  )}
-                >
-                  {slot.time}
-                </button>
-              ))}
-            </div>
+            {isLoadingSlots ? (
+              <div className="flex min-h-32 items-center justify-center gap-2 rounded-xl border border-border bg-card text-sm text-muted-foreground" role="status">
+                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                Consultando horários disponíveis...
+              </div>
+            ) : availabilityError ? (
+              <div className="flex min-h-32 flex-col items-center justify-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-5 text-center">
+                <p role="alert" className="text-sm text-destructive">{availabilityError}</p>
+                <Button type="button" variant="outline" onClick={() => date && void loadAvailability(date)}>
+                  Tentar novamente
+                </Button>
+              </div>
+            ) : timeSlots.length === 0 ? (
+              <div className="flex min-h-32 items-center justify-center rounded-xl border border-border bg-card p-5 text-center text-sm text-muted-foreground">
+                Não há horários disponíveis para esta data. Volte e escolha outro dia.
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+                {timeSlots.map((slot) => (
+                  <button
+                    key={slot.time}
+                    type="button"
+                    disabled={!slot.available}
+                    aria-pressed={time === slot.time}
+                    onClick={() => {
+                      setTime(slot.time)
+                      setSubmitError(null)
+                    }}
+                    className={cn(
+                      'rounded-lg border py-3 text-sm font-medium transition-colors',
+                      !slot.available && 'cursor-not-allowed border-border/50 text-muted-foreground/40 line-through',
+                      slot.available &&
+                        time === slot.time &&
+                        'border-primary bg-primary/10 text-foreground',
+                      slot.available &&
+                        time !== slot.time &&
+                        'border-border bg-card text-foreground hover:border-primary/50',
+                    )}
+                  >
+                    {slot.time}
+                  </button>
+                ))}
+              </div>
+            )}
           </>
         )}
 

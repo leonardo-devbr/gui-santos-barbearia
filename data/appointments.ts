@@ -57,23 +57,3 @@ export const pastAppointments: Appointment[] = [
     durationMinutes: 75,
   },
 ]
-
-// Horários mockados de um dia — usados na etapa 4 do fluxo de agendamento.
-export const mockTimeSlots = [
-  { time: '09:00', available: true },
-  { time: '09:30', available: false },
-  { time: '10:00', available: true },
-  { time: '10:30', available: true },
-  { time: '11:00', available: false },
-  { time: '11:30', available: true },
-  { time: '13:00', available: true },
-  { time: '13:30', available: true },
-  { time: '14:00', available: false },
-  { time: '14:30', available: true },
-  { time: '15:00', available: true },
-  { time: '15:30', available: true },
-  { time: '16:00', available: false },
-  { time: '16:30', available: true },
-  { time: '17:00', available: true },
-  { time: '17:30', available: true },
-]

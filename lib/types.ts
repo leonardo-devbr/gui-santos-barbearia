@@ -33,6 +33,11 @@ export interface Appointment {
   durationMinutes: number
 }
 
+export interface TimeSlot {
+  time: string // HH:mm
+  available: boolean
+}
+
 export interface Review {
   id: string
   customerName: string
