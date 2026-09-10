@@ -2,12 +2,28 @@ import type { Appointment } from '@/lib/types'
 
 // Dados mockados. Em uma futura integração, este arquivo será substituído
 // por chamadas a GET /api/appointments.
+function getNextOpenDate() {
+  const todayInSaoPaulo = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+  const date = new Date(`${todayInSaoPaulo}T12:00:00-03:00`)
+
+  do {
+    date.setUTCDate(date.getUTCDate() + 1)
+  } while (date.getUTCDay() === 0 || date.getUTCDay() === 1)
+
+  return date.toISOString().slice(0, 10)
+}
+
 export const upcomingAppointments: Appointment[] = [
   {
     id: 'ag-001',
     serviceId: 'corte-barba',
     barberId: 'guilherme',
-    date: '2026-08-22',
+    date: getNextOpenDate(),
     time: '14:30',
     status: 'confirmado',
     price: 65,
