@@ -1,0 +1,137 @@
+CREATE TABLE IF NOT EXISTS customers (
+  id CHAR(36) NOT NULL,
+  name VARCHAR(80) NOT NULL,
+  phone VARCHAR(11) NOT NULL,
+  email VARCHAR(254) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  birth_date DATE NULL,
+  photo_url VARCHAR(512) NOT NULL DEFAULT '/placeholder-user.jpg',
+  preferred_cut VARCHAR(100) NOT NULL DEFAULT '',
+  beard_style VARCHAR(100) NOT NULL DEFAULT '',
+  notes VARCHAR(500) NOT NULL DEFAULT '',
+  loyalty_points INT UNSIGNED NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY customers_email_unique (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS services (
+  id VARCHAR(64) NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  description VARCHAR(255) NOT NULL,
+  duration_minutes SMALLINT UNSIGNED NOT NULL,
+  price DECIMAL(10, 2) UNSIGNED NOT NULL,
+  category ENUM('cortes', 'barba', 'combos', 'acabamentos') NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS barbers (
+  id VARCHAR(64) NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  specialty VARCHAR(160) NOT NULL,
+  rating DECIMAL(2, 1) UNSIGNED NOT NULL DEFAULT 0,
+  review_count INT UNSIGNED NOT NULL DEFAULT 0,
+  bio VARCHAR(500) NOT NULL,
+  photo_url VARCHAR(512) NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash CHAR(64) NOT NULL,
+  customer_id CHAR(36) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (token_hash),
+  KEY sessions_customer_id_index (customer_id),
+  KEY sessions_expires_at_index (expires_at),
+  CONSTRAINT sessions_customer_id_fk
+    FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  token_hash CHAR(64) NOT NULL,
+  customer_id CHAR(36) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  used_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (token_hash),
+  KEY password_reset_customer_id_index (customer_id),
+  KEY password_reset_expires_at_index (expires_at),
+  CONSTRAINT password_reset_customer_id_fk
+    FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS appointments (
+  id CHAR(36) NOT NULL,
+  customer_id CHAR(36) NOT NULL,
+  service_id VARCHAR(64) NOT NULL,
+  barber_id VARCHAR(64) NOT NULL,
+  appointment_date DATE NOT NULL,
+  appointment_time TIME NOT NULL,
+  status ENUM('confirmado', 'pendente', 'concluido', 'cancelado') NOT NULL DEFAULT 'confirmado',
+  price DECIMAL(10, 2) UNSIGNED NOT NULL,
+  duration_minutes SMALLINT UNSIGNED NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY appointments_barber_start_unique (barber_id, appointment_date, appointment_time),
+  KEY appointments_customer_schedule_index (customer_id, appointment_date, appointment_time),
+  CONSTRAINT appointments_customer_id_fk
+    FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE,
+  CONSTRAINT appointments_service_id_fk
+    FOREIGN KEY (service_id) REFERENCES services (id),
+  CONSTRAINT appointments_barber_id_fk
+    FOREIGN KEY (barber_id) REFERENCES barbers (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+INSERT INTO services (id, name, description, duration_minutes, price, category)
+VALUES
+  ('corte', 'Corte', 'Degradê, social ou corte tradicional.', 45, 40.00, 'cortes'),
+  ('barba', 'Barba', 'Modelagem completa com navalha e toalha quente.', 30, 35.00, 'barba'),
+  ('corte-barba', 'Corte + Barba', 'O combo completo para um visual impecável.', 75, 65.00, 'combos'),
+  ('sobrancelha', 'Sobrancelha', 'Alinhamento e limpeza com navalha.', 15, 15.00, 'acabamentos'),
+  ('acabamento', 'Acabamento', 'Retoque de contorno e nuca entre cortes.', 20, 20.00, 'acabamentos'),
+  ('corte-infantil', 'Corte Infantil', 'Corte especial para os pequenos, com paciência e cuidado.', 40, 35.00, 'cortes')
+ON DUPLICATE KEY UPDATE
+  name = VALUES(name),
+  description = VALUES(description),
+  duration_minutes = VALUES(duration_minutes),
+  price = VALUES(price),
+  category = VALUES(category),
+  is_active = TRUE;
+
+INSERT INTO barbers (id, name, specialty, rating, review_count, bio, photo_url)
+VALUES
+  (
+    'guilherme',
+    'Matheus Guilherme',
+    'Especialista em degradê e corte masculino',
+    4.9,
+    218,
+    'Fundador da Gui Santos Barbearia, com mais de 12 anos de experiência em cortes masculinos de alto padrão.',
+    '/images/WhatsApp Image 2026-08-26 at 13.09.49.jpeg'
+  ),
+  (
+    'vitor',
+    'Vitor',
+    'Especialista em degradê e corte masculino',
+    4.9,
+    134,
+    'Especialista em degradê e corte masculino, com atenção aos detalhes para um resultado preciso.',
+    '/images/b123ae60-0e4a-479b-aba0-a533ed6f4a98.jpg'
+  )
+ON DUPLICATE KEY UPDATE
+  name = VALUES(name),
+  specialty = VALUES(specialty),
+  rating = VALUES(rating),
+  review_count = VALUES(review_count),
+  bio = VALUES(bio),
+  photo_url = VALUES(photo_url),
+  is_active = TRUE;
