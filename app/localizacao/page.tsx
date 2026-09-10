@@ -6,18 +6,12 @@ import { SiteFooter } from '@/components/site-footer'
 import { Button } from '@/components/ui/button'
 import { LocationMapLoader } from '@/components/location-map-loader'
 import { getLoginHref } from '@/lib/navigation'
+import { barbershop } from '@/data/barbershop'
 
 export const metadata: Metadata = {
   title: 'Localização | Gui Santos Barbearia',
   description: 'Encontre a Gui Santos Barbearia. Endereço, horário de funcionamento e como chegar.',
 }
-
-const hours = [
-  { day: 'Segunda-feira', time: 'Fechado' },
-  { day: 'Terça a sexta-feira', time: '9h às 20h' },
-  { day: 'Sábado', time: '9h às 18h' },
-  { day: 'Domingo', time: 'Fechado' },
-]
 
 export default function LocationPage() {
   return (
@@ -30,7 +24,7 @@ export default function LocationPage() {
             Localização
           </h1>
           <p className="mt-4 max-w-xl text-pretty text-sm leading-relaxed text-muted-foreground">
-            Estamos no coração do Jardim América, com fácil acesso e vagas de estacionamento
+            Estamos no coração do {barbershop.address.district}, com fácil acesso e vagas de estacionamento
             próximas. Venha nos conhecer.
           </p>
         </div>
@@ -47,9 +41,9 @@ export default function LocationPage() {
                 <div className="flex flex-col gap-1">
                   <h3 className="font-serif text-lg text-card-foreground">Endereço</h3>
                   <p className="text-sm text-muted-foreground">
-                    Rua das Palmeiras, 245 — Jardim América
+                    {barbershop.address.street} — {barbershop.address.district}
                     <br />
-                    São Paulo, SP — CEP 01432-000
+                    {barbershop.address.city}, {barbershop.address.state} — CEP {barbershop.address.postalCode}
                   </p>
                 </div>
               </div>
@@ -58,7 +52,9 @@ export default function LocationPage() {
                 <Phone className="mt-0.5 size-5 shrink-0 text-primary" />
                 <div className="flex flex-col gap-1">
                   <h3 className="font-serif text-lg text-card-foreground">Telefone</h3>
-                  <p className="text-sm text-muted-foreground">(11) 4002-8899</p>
+                  <a href={barbershop.phone.href} className="text-sm text-muted-foreground transition-colors hover:text-primary">
+                    {barbershop.phone.display}
+                  </a>
                 </div>
               </div>
 
@@ -66,7 +62,9 @@ export default function LocationPage() {
                 <Mail className="mt-0.5 size-5 shrink-0 text-primary" />
                 <div className="flex flex-col gap-1">
                   <h3 className="font-serif text-lg text-card-foreground">E-mail</h3>
-                  <p className="text-sm text-muted-foreground">contato@guisantosbarbearia.com.br</p>
+                  <a href={barbershop.email.href} className="text-sm text-muted-foreground transition-colors hover:text-primary">
+                    {barbershop.email.display}
+                  </a>
                 </div>
               </div>
             </div>
@@ -77,10 +75,10 @@ export default function LocationPage() {
                 <h3 className="font-serif text-lg text-card-foreground">Horário de funcionamento</h3>
               </div>
               <div className="flex flex-col gap-2">
-                {hours.map((h) => (
-                  <div key={h.day} className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">{h.day}</span>
-                    <span className="font-medium text-card-foreground">{h.time}</span>
+                {barbershop.openingHours.map((item) => (
+                  <div key={item.days} className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">{item.days}</span>
+                    <span className="font-medium text-card-foreground">{item.time}</span>
                   </div>
                 ))}
               </div>

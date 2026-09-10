@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { MapPin, Phone, Clock } from "lucide-react"
+import { barbershop } from "@/data/barbershop"
 
 export function SiteFooter() {
   return (
@@ -40,11 +41,15 @@ export function SiteFooter() {
             </h3>
             <div className="flex items-start gap-2 text-sm text-muted-foreground">
               <MapPin className="mt-0.5 size-4 shrink-0 text-primary" />
-              <span>Rua das Palmeiras, 245 — Jardim América, São Paulo</span>
+              <span>
+                {barbershop.address.street} — {barbershop.address.district}, {barbershop.address.city}
+              </span>
             </div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Phone className="size-4 shrink-0 text-primary" />
-              <span>(11) 4002-8899</span>
+              <a href={barbershop.phone.href} className="transition-colors hover:text-primary">
+                {barbershop.phone.display}
+              </a>
             </div>
           </div>
 
@@ -55,8 +60,11 @@ export function SiteFooter() {
             <div className="flex items-start gap-2 text-sm text-muted-foreground">
               <Clock className="mt-0.5 size-4 shrink-0 text-primary" />
               <div className="flex flex-col gap-1">
-                <span>Terça a sábado: 9h às 20h</span>
-                <span>Domingo e segunda: fechado</span>
+                {barbershop.openingHours.map((item) => (
+                  <span key={item.days}>
+                    {item.days}: {item.time.toLocaleLowerCase('pt-BR')}
+                  </span>
+                ))}
               </div>
             </div>
           </div>

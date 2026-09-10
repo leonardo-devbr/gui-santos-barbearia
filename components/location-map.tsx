@@ -3,15 +3,15 @@
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { barbershop } from '@/data/barbershop'
 
-const position: [number, number] = [-23.5638, -46.6558]
+const position: [number, number] = [...barbershop.coordinates]
+const markerSvg = encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42"><path d="M16 0C7.163 0 0 7.163 0 16c0 11 16 26 16 26s16-15 16-26C32 7.163 24.837 0 16 0z" fill="#D4A94E"/><circle cx="16" cy="16" r="6" fill="#141210"/></svg>',
+)
 
 const goldIcon = L.icon({
-  iconUrl:
-    'data:image/svg+xml;base64,' +
-    Buffer.from(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42"><path d="M16 0C7.163 0 0 7.163 0 16c0 11 16 26 16 26s16-15 16-26C32 7.163 24.837 0 16 0z" fill="#D4A94E"/><circle cx="16" cy="16" r="6" fill="#141210"/></svg>`,
-    ).toString('base64'),
+  iconUrl: `data:image/svg+xml;charset=UTF-8,${markerSvg}`,
   iconSize: [32, 42],
   iconAnchor: [16, 42],
   popupAnchor: [0, -38],
@@ -32,9 +32,9 @@ export function LocationMap() {
       />
       <Marker position={position} icon={goldIcon}>
         <Popup>
-          <span className="font-medium">Gui Santos Barbearia</span>
+          <span className="font-medium">{barbershop.name}</span>
           <br />
-          Rua das Palmeiras, 245
+          {barbershop.address.street}
         </Popup>
       </Marker>
     </MapContainer>

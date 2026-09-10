@@ -38,16 +38,3 @@ export const reviews: Review[] = [
     date: '2026-06-18',
   },
 ]
-
-export const barbershopInfo = {
-  name: 'Gui Santos Barbearia',
-  address: 'Rua Augusta, 1200 — Jardins, São Paulo — SP',
-  phone: '(15) 99130-7316',
-  whatsapp: '(15) 99130-7316',
-  hours: [
-    { day: 'Segunda a Sexta', time: '09:00 — 20:00' },
-    { day: 'Sábado', time: '09:00 — 18:00' },
-    { day: 'Domingo', time: 'Fechado' },
-  ],
-  mapsUrl: 'https://maps.google.com/?q=Rua+Augusta+1200+Sao+Paulo',
-}
