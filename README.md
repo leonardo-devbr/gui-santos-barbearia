@@ -8,18 +8,39 @@ Site e área do cliente para cadastro, autenticação e agendamento de horários
 - React 19 e TypeScript
 - Tailwind CSS 4
 - Base UI e Lucide Icons
-- MySQL planejado para a persistência do backend
+- MySQL 8 para persistência de clientes, sessões, catálogo e agendamentos
 
 ## Executando localmente
 
-Requisitos: Node.js 20.9 ou superior e npm.
+Requisitos: Node.js 20.9 ou superior, npm e MySQL 8.
 
-```bash
+Instale as dependências e crie a configuração local:
+
+```powershell
 npm install
+Copy-Item .env.example .env.local
+```
+
+Edite `.env.local` e informe a senha definida na instalação do MySQL. Em seguida, crie as tabelas e carregue o catálogo inicial:
+
+```powershell
+npm run db:setup
 npm run dev
 ```
 
-O projeto ficará disponível em `http://localhost:3000`.
+O comando `db:setup` é idempotente: ele cria o banco `gui_santos_barbearia`, mantém dados existentes e atualiza os serviços e barbeiros iniciais. O projeto ficará disponível em `http://localhost:3000`.
+
+As variáveis disponíveis são:
+
+| Variável | Padrão |
+| --- | --- |
+| `MYSQL_HOST` | `127.0.0.1` |
+| `MYSQL_PORT` | `3306` |
+| `MYSQL_USER` | `root` |
+| `MYSQL_PASSWORD` | sem valor padrão |
+| `MYSQL_DATABASE` | `gui_santos_barbearia` |
+
+O arquivo `.env.local` não é versionado. Em produção, use um usuário próprio da aplicação com acesso somente ao banco do projeto.
 
 Antes de publicar uma mudança, execute:
 
@@ -31,9 +52,13 @@ npm run build
 
 ## Estado da integração
 
-Os formulários e ações de escrita já usam HTTP, mas as leituras de clientes, serviços, barbeiros e agendamentos ainda vêm dos arquivos em `data/`. Esses dados são temporários e deverão ser substituídos pelas consultas ao backend quando a integração com MySQL for iniciada.
+O backend usa Route Handlers do Next.js e MySQL. Cadastro, login, logout, perfil, catálogo, disponibilidade, criação, remarcação, cancelamento e histórico de agendamentos estão conectados ao banco.
 
-Todas as requisições e respostas usam JSON. Em erros, a API deve responder com um status HTTP adequado e, sempre que possível, com este formato:
+As senhas usam derivação `scrypt`. Sessões e tokens de recuperação ficam no MySQL, enquanto o navegador recebe apenas um cookie de sessão `HttpOnly`. A confirmação de um horário ocorre dentro de uma transação que bloqueia o barbeiro selecionado e verifica novamente qualquer sobreposição.
+
+Durante o desenvolvimento, a recuperação de senha mostra o link local na própria tela e no terminal. Em produção, o token continua sendo criado com segurança, mas será necessário conectar um serviço de envio de e-mail para entregar o link ao cliente.
+
+Todas as requisições e respostas usam JSON. Em erros, a API responde com um status HTTP adequado e, sempre que possível, com este formato:
 
 ```json
 {
@@ -46,19 +71,19 @@ Todas as requisições e respostas usam JSON. Em erros, a API deve responder com
 
 `errors` é opcional. Os nomes dos campos devem corresponder aos payloads descritos abaixo.
 
-## Contrato da API
+## API implementada
 
 ### Autenticação
 
-| Método | Rota | Corpo | Comportamento esperado |
+| Método | Rota | Corpo | Comportamento |
 | --- | --- | --- | --- |
 | `POST` | `/api/auth/register` | `{ "name", "phone", "email", "password" }` | Cria a conta; e-mail deve ser único. |
 | `POST` | `/api/auth/login` | `{ "email", "password" }` | Cria a sessão e envia um cookie seguro e `HttpOnly`. |
 | `POST` | `/api/auth/logout` | Sem corpo | Invalida a sessão e remove o cookie. |
-| `POST` | `/api/auth/forgot-password` | `{ "email" }` | Envia um link de recuperação sem revelar se o e-mail existe. |
+| `POST` | `/api/auth/forgot-password` | `{ "email" }` | Cria um token sem revelar se o e-mail existe; em desenvolvimento, devolve o link local. |
 | `POST` | `/api/auth/reset-password` | `{ "token", "password" }` | Consome um token válido e altera a senha. |
 
-O link enviado por e-mail deve apontar para `/redefinir-senha?token=TOKEN`. Tokens de recuperação precisam ser aleatórios, armazenados de forma segura, ter expiração curta e ser invalidados após o uso.
+O link de recuperação aponta para `/redefinir-senha?token=TOKEN`. O token é aleatório, armazenado somente como hash, expira em uma hora e é invalidado após o uso.
 
 ### Agendamentos
 
@@ -75,13 +100,13 @@ Resposta de sucesso:
 }
 ```
 
-| Método | Rota | Corpo | Comportamento esperado |
+| Método | Rota | Corpo | Comportamento |
 | --- | --- | --- | --- |
 | `POST` | `/api/appointments` | `{ "serviceId", "barberId", "date", "time" }` | Cria um agendamento para o cliente autenticado. |
 | `PATCH` | `/api/appointments/:id` | `{ "serviceId", "barberId", "date", "time" }` | Remarca um agendamento pertencente ao cliente autenticado. |
 | `DELETE` | `/api/appointments/:id` | Sem corpo | Cancela um agendamento pertencente ao cliente autenticado. |
 
-A disponibilidade exibida no navegador é apenas informativa. Ao criar ou remarcar, o backend deve validar novamente o horário dentro de uma transação para impedir dois agendamentos simultâneos para o mesmo barbeiro.
+A disponibilidade exibida no navegador é apenas informativa. Ao criar ou remarcar, o backend valida novamente o horário dentro de uma transação para impedir dois agendamentos simultâneos para o mesmo barbeiro.
 
 ### Perfil
 
@@ -101,9 +126,7 @@ A disponibilidade exibida no navegador é apenas informativa. Ao criar ou remarc
 
 Essa rota exige autenticação e só pode alterar o perfil vinculado à sessão atual.
 
-### Leituras a implementar
-
-Quando o backend for conectado, os dados temporários deverão ser substituídos por:
+### Leituras
 
 - `GET /api/customers/me`
 - `GET /api/services`
@@ -111,7 +134,7 @@ Quando o backend for conectado, os dados temporários deverão ser substituídos
 - `GET /api/appointments`
 - `GET /api/appointments?scope=history`
 
-## Regras mínimas para o backend MySQL
+## Regras do backend MySQL
 
 - Nunca armazenar senhas ou tokens de recuperação em texto puro.
 - Normalizar e garantir a unicidade do e-mail.
