@@ -35,6 +35,12 @@ export interface Appointment {
   durationMinutes: number
 }
 
+export interface AdminAppointment extends Appointment {
+  customerName: string
+  customerPhone: string
+  customerEmail: string
+}
+
 export const serviceCategoryLabels: Record<Service['category'], string> = {
   cortes: 'Cortes',
   barba: 'Barba',

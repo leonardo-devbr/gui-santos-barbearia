@@ -32,10 +32,13 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
               <LayoutDashboard className="size-4" />
               Resumo
             </Link>
-            <span className="hidden items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground sm:flex">
+            <Link
+              href="/admin/agendamentos"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
               <CalendarDays className="size-4" />
-              Agenda em breve
-            </span>
+              Agenda
+            </Link>
           </nav>
 
           <div className="flex items-center gap-2">
