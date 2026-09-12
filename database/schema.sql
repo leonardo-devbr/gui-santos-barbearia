@@ -76,12 +76,20 @@ CREATE TABLE IF NOT EXISTS appointments (
   appointment_date DATE NOT NULL,
   appointment_time TIME NOT NULL,
   status ENUM('confirmado', 'pendente', 'concluido', 'cancelado') NOT NULL DEFAULT 'confirmado',
+  active_slot BOOLEAN GENERATED ALWAYS AS (
+    IF(status IN ('confirmado', 'pendente'), TRUE, NULL)
+  ) STORED,
   price DECIMAL(10, 2) UNSIGNED NOT NULL,
   duration_minutes SMALLINT UNSIGNED NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY appointments_barber_start_unique (barber_id, appointment_date, appointment_time),
+  UNIQUE KEY appointments_active_start_unique (
+    barber_id,
+    appointment_date,
+    appointment_time,
+    active_slot
+  ),
   KEY appointments_customer_schedule_index (customer_id, appointment_date, appointment_time),
   CONSTRAINT appointments_customer_id_fk
     FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE,
