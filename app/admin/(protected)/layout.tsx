@@ -5,6 +5,7 @@ import {
   CalendarOff,
   LayoutDashboard,
   Scissors,
+  Settings,
   ShieldCheck,
   UsersRound,
 } from 'lucide-react'
@@ -66,6 +67,13 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
             >
               <UsersRound className="size-4" />
               Barbeiros
+            </Link>
+            <Link
+              href="/admin/configuracoes"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Settings className="size-4" />
+              Configurações
             </Link>
           </nav>
 

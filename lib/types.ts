@@ -59,6 +59,34 @@ export interface ScheduleBlock {
   reason: string
 }
 
+export interface BusinessSettings {
+  name: string
+  street: string
+  district: string
+  city: string
+  state: string
+  postalCode: string
+  phone: string
+  email: string
+  latitude: number
+  longitude: number
+  parkingInfo: string
+  transitInfo: string
+  cnpj: string
+}
+
+export interface BusinessHour {
+  weekday: number
+  isOpen: boolean
+  openTime: string | null
+  closeTime: string | null
+}
+
+export interface BusinessConfiguration {
+  settings: BusinessSettings
+  hours: BusinessHour[]
+}
+
 export const serviceCategoryLabels: Record<Service['category'], string> = {
   cortes: 'Cortes',
   barba: 'Barba',

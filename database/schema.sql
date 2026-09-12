@@ -72,6 +72,40 @@ CREATE TABLE IF NOT EXISTS staff_sessions (
     FOREIGN KEY (staff_user_id) REFERENCES staff_users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS business_settings (
+  id TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  name VARCHAR(100) NOT NULL,
+  street VARCHAR(160) NOT NULL,
+  district VARCHAR(100) NOT NULL,
+  city VARCHAR(100) NOT NULL,
+  state CHAR(2) NOT NULL,
+  postal_code CHAR(8) NOT NULL,
+  phone VARCHAR(11) NOT NULL,
+  email VARCHAR(254) NOT NULL,
+  latitude DECIMAL(10, 7) NOT NULL,
+  longitude DECIMAL(10, 7) NOT NULL,
+  parking_info VARCHAR(255) NOT NULL DEFAULT '',
+  transit_info VARCHAR(255) NOT NULL DEFAULT '',
+  cnpj VARCHAR(14) NOT NULL DEFAULT '',
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  CONSTRAINT business_settings_single_row_check CHECK (id = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS business_hours (
+  weekday TINYINT UNSIGNED NOT NULL,
+  is_open BOOLEAN NOT NULL DEFAULT FALSE,
+  open_time TIME NULL,
+  close_time TIME NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (weekday),
+  CONSTRAINT business_hours_weekday_check CHECK (weekday BETWEEN 0 AND 6),
+  CONSTRAINT business_hours_range_check CHECK (
+    (is_open = FALSE AND open_time IS NULL AND close_time IS NULL)
+    OR (is_open = TRUE AND open_time IS NOT NULL AND close_time IS NOT NULL AND open_time < close_time)
+  )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash CHAR(64) NOT NULL,
   customer_id CHAR(36) NOT NULL,
@@ -195,3 +229,33 @@ ON DUPLICATE KEY UPDATE
   bio = VALUES(bio),
   photo_url = VALUES(photo_url),
   is_active = TRUE;
+
+INSERT IGNORE INTO business_settings
+  (id, name, street, district, city, state, postal_code, phone, email, latitude, longitude, parking_info, transit_info, cnpj)
+VALUES
+  (
+    1,
+    'Gui Santos Barbearia',
+    'Rua das Palmeiras, 245',
+    'Jardim América',
+    'São Paulo',
+    'SP',
+    '01432000',
+    '1140028899',
+    'contato@guisantosbarbearia.com.br',
+    -23.5638000,
+    -46.6558000,
+    'Estacionamento conveniado a 50m, na Rua Aurora.',
+    'Estação Jardim América a 5 minutos a pé.',
+    '12345678000190'
+  );
+
+INSERT IGNORE INTO business_hours (weekday, is_open, open_time, close_time)
+VALUES
+  (0, FALSE, NULL, NULL),
+  (1, FALSE, NULL, NULL),
+  (2, TRUE, '09:00:00', '20:00:00'),
+  (3, TRUE, '09:00:00', '20:00:00'),
+  (4, TRUE, '09:00:00', '20:00:00'),
+  (5, TRUE, '09:00:00', '20:00:00'),
+  (6, TRUE, '09:00:00', '18:00:00');

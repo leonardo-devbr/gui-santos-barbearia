@@ -39,6 +39,12 @@ interface ScheduleBlockRow extends RowDataPacket {
   end_time: string | null
 }
 
+interface BusinessHoursRow extends RowDataPacket {
+  is_open: number | boolean
+  open_time: string | null
+  close_time: string | null
+}
+
 interface OwnedAppointmentRow extends RowDataPacket {
   id: string
   barber_id: string
@@ -87,19 +93,24 @@ function minutesToTime(minutes: number) {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
 }
 
-function getBusinessHours(date: string) {
-  const weekday = new Date(`${date}T12:00:00.000Z`).getUTCDay()
-
-  if (weekday === 0 || weekday === 1) return null
-  return { opensAt: 9 * 60, closesAt: weekday === 6 ? 18 * 60 : 20 * 60 }
+function parseBusinessHours(row: BusinessHoursRow | undefined) {
+  if (!row || !row.is_open || !row.open_time || !row.close_time) return null
+  return {
+    opensAt: timeToMinutes(row.open_time.slice(0, 5)),
+    closesAt: timeToMinutes(row.close_time.slice(0, 5)),
+  }
 }
 
-function validateBookingTime(date: string, time: string, durationMinutes: number) {
+function validateBookingTime(
+  date: string,
+  time: string,
+  durationMinutes: number,
+  hours: { opensAt: number; closesAt: number } | null,
+) {
   if (!isValidIsoDate(date) || !isValidTime(time)) {
     throw new AppointmentError('Informe uma data e um horário válidos.', 422)
   }
 
-  const hours = getBusinessHours(date)
   if (!hours) throw new AppointmentError('A barbearia não abre nesta data.', 422)
 
   const start = timeToMinutes(time)
@@ -189,7 +200,8 @@ export async function getAvailability({
   if (!isValidIsoDate(date)) throw new AppointmentError('Informe uma data válida.', 422)
 
   const pool = getPool()
-  const [[serviceRows], [barberRows]] = await Promise.all([
+  const weekday = new Date(`${date}T12:00:00.000Z`).getUTCDay()
+  const [[serviceRows], [barberRows], [businessHoursRows]] = await Promise.all([
     pool.execute<ServiceBookingRow[]>(
       'SELECT id, duration_minutes, price FROM services WHERE id = ? AND is_active = TRUE LIMIT 1',
       [serviceId],
@@ -197,6 +209,10 @@ export async function getAvailability({
     pool.execute<IdRow[]>('SELECT id FROM barbers WHERE id = ? AND is_active = TRUE LIMIT 1', [
       barberId,
     ]),
+    pool.execute<BusinessHoursRow[]>(
+      'SELECT is_open, open_time, close_time FROM business_hours WHERE weekday = ? LIMIT 1',
+      [weekday],
+    ),
   ])
   const service = serviceRows[0]
 
@@ -204,7 +220,7 @@ export async function getAvailability({
     throw new AppointmentError('O serviço ou barbeiro selecionado não está disponível.', 422)
   }
 
-  const hours = getBusinessHours(date)
+  const hours = parseBusinessHours(businessHoursRows[0])
   if (!hours) return []
 
   let excludedAppointmentId: string | undefined
@@ -283,7 +299,22 @@ async function getBookingResources(connection: PoolConnection, input: Appointmen
   )
   if (!barberRows[0]) throw new AppointmentError('O barbeiro selecionado não está disponível.', 422)
 
-  validateBookingTime(input.date, input.time, service.duration_minutes)
+  const weekday = new Date(`${input.date}T12:00:00.000Z`).getUTCDay()
+  const [businessHoursRows] = await connection.execute<BusinessHoursRow[]>(
+    `SELECT is_open, open_time, close_time
+     FROM business_hours
+     WHERE weekday = ?
+     LIMIT 1
+     FOR UPDATE`,
+    [weekday],
+  )
+
+  validateBookingTime(
+    input.date,
+    input.time,
+    service.duration_minutes,
+    parseBusinessHours(businessHoursRows[0]),
+  )
   return service
 }
 

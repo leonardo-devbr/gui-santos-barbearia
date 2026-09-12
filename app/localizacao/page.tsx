@@ -6,14 +6,18 @@ import { SiteFooter } from '@/components/site-footer'
 import { Button } from '@/components/ui/button'
 import { LocationMapLoader } from '@/components/location-map-loader'
 import { getLoginHref } from '@/lib/navigation'
-import { barbershop } from '@/data/barbershop'
+import { getBusinessConfiguration } from '@/lib/business'
+import { formatBusinessHour, formatPostalCode, getWeekdayLabel } from '@/lib/business-labels'
+import { formatPhone } from '@/lib/validation'
 
 export const metadata: Metadata = {
   title: 'Localização | Gui Santos Barbearia',
   description: 'Encontre a Gui Santos Barbearia. Endereço, horário de funcionamento e como chegar.',
 }
 
-export default function LocationPage() {
+export default async function LocationPage() {
+  const { settings, hours } = await getBusinessConfiguration()
+
   return (
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
@@ -24,14 +28,13 @@ export default function LocationPage() {
             Localização
           </h1>
           <p className="mt-4 max-w-xl text-pretty text-sm leading-relaxed text-muted-foreground">
-            Estamos no coração do {barbershop.address.district}, com fácil acesso e vagas de estacionamento
-            próximas. Venha nos conhecer.
+            Estamos no coração do {settings.district}, com fácil acesso e estrutura para receber você.
           </p>
         </div>
 
         <div className="mx-auto grid max-w-6xl grid-cols-1 gap-8 px-6 pb-24 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="h-[420px] overflow-hidden rounded-xl border border-border lg:h-[560px]">
-            <LocationMapLoader />
+            <LocationMapLoader settings={settings} />
           </div>
 
           <div className="flex flex-col gap-6">
@@ -41,9 +44,9 @@ export default function LocationPage() {
                 <div className="flex flex-col gap-1">
                   <h3 className="font-serif text-lg text-card-foreground">Endereço</h3>
                   <p className="text-sm text-muted-foreground">
-                    {barbershop.address.street} — {barbershop.address.district}
+                    {settings.street} — {settings.district}
                     <br />
-                    {barbershop.address.city}, {barbershop.address.state} — CEP {barbershop.address.postalCode}
+                    {settings.city}, {settings.state} — CEP {formatPostalCode(settings.postalCode)}
                   </p>
                 </div>
               </div>
@@ -52,8 +55,8 @@ export default function LocationPage() {
                 <Phone className="mt-0.5 size-5 shrink-0 text-primary" />
                 <div className="flex flex-col gap-1">
                   <h3 className="font-serif text-lg text-card-foreground">Telefone</h3>
-                  <a href={barbershop.phone.href} className="text-sm text-muted-foreground transition-colors hover:text-primary">
-                    {barbershop.phone.display}
+                  <a href={`tel:+55${settings.phone}`} className="text-sm text-muted-foreground transition-colors hover:text-primary">
+                    {formatPhone(settings.phone)}
                   </a>
                 </div>
               </div>
@@ -62,8 +65,8 @@ export default function LocationPage() {
                 <Mail className="mt-0.5 size-5 shrink-0 text-primary" />
                 <div className="flex flex-col gap-1">
                   <h3 className="font-serif text-lg text-card-foreground">E-mail</h3>
-                  <a href={barbershop.email.href} className="text-sm text-muted-foreground transition-colors hover:text-primary">
-                    {barbershop.email.display}
+                  <a href={`mailto:${settings.email}`} className="text-sm text-muted-foreground transition-colors hover:text-primary">
+                    {settings.email}
                   </a>
                 </div>
               </div>
@@ -75,27 +78,31 @@ export default function LocationPage() {
                 <h3 className="font-serif text-lg text-card-foreground">Horário de funcionamento</h3>
               </div>
               <div className="flex flex-col gap-2">
-                {barbershop.openingHours.map((item) => (
-                  <div key={item.days} className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">{item.days}</span>
-                    <span className="font-medium text-card-foreground">{item.time}</span>
+                {hours.map((hour) => (
+                  <div key={hour.weekday} className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">{getWeekdayLabel(hour.weekday)}</span>
+                    <span className="font-medium text-card-foreground">{formatBusinessHour(hour)}</span>
                   </div>
                 ))}
               </div>
             </div>
 
-            <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-6">
-              <div className="flex items-center gap-3">
-                <Car className="size-5 shrink-0 text-primary" />
-                <p className="text-sm text-muted-foreground">Estacionamento conveniado a 50m, na Rua Aurora.</p>
+            {(settings.parkingInfo || settings.transitInfo) && (
+              <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-6">
+                {settings.parkingInfo && (
+                  <div className="flex items-center gap-3">
+                    <Car className="size-5 shrink-0 text-primary" />
+                    <p className="text-sm text-muted-foreground">{settings.parkingInfo}</p>
+                  </div>
+                )}
+                {settings.transitInfo && (
+                  <div className="flex items-center gap-3">
+                    <TramFront className="size-5 shrink-0 text-primary" />
+                    <p className="text-sm text-muted-foreground">{settings.transitInfo}</p>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-3">
-                <TramFront className="size-5 shrink-0 text-primary" />
-                <p className="text-sm text-muted-foreground">
-                  Estação Jardim América a 5 minutos a pé.
-                </p>
-              </div>
-            </div>
+            )}
 
             <Button size="lg" render={<Link href={getLoginHref('/app/agendar')} />} nativeButton={false}>
               Agendar horário

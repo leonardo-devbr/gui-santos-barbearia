@@ -3,9 +3,6 @@
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { barbershop } from '@/data/barbershop'
-
-const position: [number, number] = [...barbershop.coordinates]
 const markerSvg = encodeURIComponent(
   '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42"><path d="M16 0C7.163 0 0 7.163 0 16c0 11 16 26 16 26s16-15 16-26C32 7.163 24.837 0 16 0z" fill="#D4A94E"/><circle cx="16" cy="16" r="6" fill="#141210"/></svg>',
 )
@@ -17,7 +14,19 @@ const goldIcon = L.icon({
   popupAnchor: [0, -38],
 })
 
-export function LocationMap() {
+export function LocationMap({
+  name,
+  street,
+  latitude,
+  longitude,
+}: {
+  name: string
+  street: string
+  latitude: number
+  longitude: number
+}) {
+  const position: [number, number] = [latitude, longitude]
+
   return (
     <MapContainer
       center={position}
@@ -32,9 +41,9 @@ export function LocationMap() {
       />
       <Marker position={position} icon={goldIcon}>
         <Popup>
-          <span className="font-medium">{barbershop.name}</span>
+          <span className="font-medium">{name}</span>
           <br />
-          {barbershop.address.street}
+          {street}
         </Popup>
       </Marker>
     </MapContainer>
