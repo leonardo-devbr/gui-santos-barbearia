@@ -1,7 +1,6 @@
 import Link from 'next/link'
 import { RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { getServiceById } from '@/data/services'
 import { formatDateShort } from '@/lib/format'
 import type { Appointment } from '@/lib/types'
 
@@ -10,7 +9,6 @@ interface BookAgainCardProps {
 }
 
 export function BookAgainCard({ lastAppointment }: BookAgainCardProps) {
-  const service = getServiceById(lastAppointment.serviceId)
   const bookingParams = new URLSearchParams({
     servico: lastAppointment.serviceId,
     barbeiro: lastAppointment.barberId,
@@ -26,7 +24,9 @@ export function BookAgainCard({ lastAppointment }: BookAgainCardProps) {
           <span className="text-xs font-medium tracking-wide text-muted-foreground">
             ÚLTIMO SERVIÇO REALIZADO
           </span>
-          <span className="font-serif text-lg text-card-foreground">{service?.name}</span>
+          <span className="font-serif text-lg text-card-foreground">
+            {lastAppointment.serviceName ?? 'Serviço'}
+          </span>
           <span className="text-sm text-muted-foreground">
             Realizado em {formatDateShort(lastAppointment.date)}
           </span>

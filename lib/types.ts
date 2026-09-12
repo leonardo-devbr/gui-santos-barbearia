@@ -26,6 +26,8 @@ export interface Appointment {
   id: string
   serviceId: string
   barberId: string
+  serviceName?: string
+  barberName?: string
   date: string // ISO date, e.g. 2026-08-22
   time: string // HH:mm
   status: AppointmentStatus

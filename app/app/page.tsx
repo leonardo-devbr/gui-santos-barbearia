@@ -6,14 +6,21 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyCont
 import { Button } from '@/components/ui/button'
 import { CalendarPlus } from 'lucide-react'
 import Link from 'next/link'
-import { currentCustomer } from '@/data/customer'
-import { upcomingAppointments, pastAppointments } from '@/data/appointments'
+import { getAppointments } from '@/lib/appointments'
+import { getAuthenticatedCustomer } from '@/lib/auth'
 
 export const metadata: Metadata = {
   title: 'Minha Área | Gui Santos Barbearia',
 }
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  const currentCustomer = await getAuthenticatedCustomer()
+  if (!currentCustomer) return null
+
+  const [upcomingAppointments, pastAppointments] = await Promise.all([
+    getAppointments(currentCustomer.id, 'upcoming'),
+    getAppointments(currentCustomer.id, 'history'),
+  ])
   const nextAppointment = upcomingAppointments[0]
   const lastAppointment = pastAppointments.find((a) => a.status === 'concluido')
   const firstName = currentCustomer.name.split(' ')[0]

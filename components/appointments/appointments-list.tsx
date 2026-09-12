@@ -25,7 +25,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { getServiceById } from '@/data/services'
 import type { Appointment } from '@/lib/types'
 
 interface AppointmentResponse {
@@ -71,10 +70,9 @@ export function AppointmentsList({ initial }: { initial: Appointment[] }) {
         return
       }
 
-      const service = getServiceById(toCancel.serviceId)
       setAppointments((previous) => previous.filter((appointment) => appointment.id !== toCancel.id))
       toast.success('Agendamento cancelado', {
-        description: `${service?.name ?? 'Serviço'} foi cancelado.`,
+        description: `${toCancel.serviceName ?? 'Serviço'} foi cancelado.`,
       })
       setToCancel(null)
       router.refresh()

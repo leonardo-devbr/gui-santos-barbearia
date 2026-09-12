@@ -148,6 +148,7 @@ export function BookingFlow({
     setIsLoadingSlots(true)
 
     const params = new URLSearchParams({ serviceId, barberId, date: selectedDate })
+    if (appointmentId) params.set('appointmentId', appointmentId)
 
     try {
       const response = await fetch(`/api/availability?${params.toString()}`, {

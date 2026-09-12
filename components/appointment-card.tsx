@@ -2,8 +2,6 @@ import { CalendarDays, Clock, Scissors } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { StatusBadge } from '@/components/status-badge'
-import { getServiceById } from '@/data/services'
-import { getBarberById } from '@/data/barbers'
 import { formatDateLong, formatPrice } from '@/lib/format'
 import type { Appointment } from '@/lib/types'
 
@@ -20,16 +18,17 @@ export function AppointmentCard({
   onCancel,
   onBookAgain,
 }: AppointmentCardProps) {
-  const service = getServiceById(appointment.serviceId)
-  const barber = getBarberById(appointment.barberId)
-
   return (
     <Card>
       <CardContent className="flex flex-col gap-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex flex-col gap-1">
-            <h3 className="font-serif text-lg text-card-foreground">{service?.name}</h3>
-            <p className="text-sm text-muted-foreground">Com {barber?.name}</p>
+            <h3 className="font-serif text-lg text-card-foreground">
+              {appointment.serviceName ?? 'Serviço'}
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Com {appointment.barberName ?? 'barbeiro'}
+            </p>
           </div>
           <StatusBadge status={appointment.status} />
         </div>

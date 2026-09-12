@@ -1,13 +1,18 @@
 import type { Metadata } from 'next'
 import { HistoryList } from '@/components/appointments/history-list'
-import { pastAppointments } from '@/data/appointments'
 import { formatPrice } from '@/lib/format'
+import { getAppointments } from '@/lib/appointments'
+import { getAuthenticatedCustomer } from '@/lib/auth'
 
 export const metadata: Metadata = {
   title: 'Histórico | Gui Santos Barbearia',
 }
 
-export default function HistoricoPage() {
+export default async function HistoricoPage() {
+  const customer = await getAuthenticatedCustomer()
+  if (!customer) return null
+
+  const pastAppointments = await getAppointments(customer.id, 'history')
   const completed = pastAppointments.filter((a) => a.status === 'concluido')
   const totalSpent = completed.reduce((sum, a) => sum + a.price, 0)
 

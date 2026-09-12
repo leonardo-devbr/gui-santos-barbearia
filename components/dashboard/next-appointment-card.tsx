@@ -1,8 +1,6 @@
 import Link from 'next/link'
 import { CalendarDays, Clock, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { getServiceById } from '@/data/services'
-import { getBarberById } from '@/data/barbers'
 import { formatDateLong } from '@/lib/format'
 import type { Appointment } from '@/lib/types'
 
@@ -11,8 +9,6 @@ interface NextAppointmentCardProps {
 }
 
 export function NextAppointmentCard({ appointment }: NextAppointmentCardProps) {
-  const service = getServiceById(appointment.serviceId)
-  const barber = getBarberById(appointment.barberId)
   const rescheduleParams = new URLSearchParams({
     agendamento: appointment.id,
     servico: appointment.serviceId,
@@ -30,7 +26,7 @@ export function NextAppointmentCard({ appointment }: NextAppointmentCardProps) {
         </div>
 
         <h2 className="font-serif text-3xl text-balance text-foreground sm:text-4xl">
-          {service?.name.toUpperCase()}
+          {(appointment.serviceName ?? 'Serviço').toUpperCase()}
         </h2>
 
         <div className="flex flex-wrap gap-x-6 gap-y-3 text-sm text-muted-foreground">
@@ -44,7 +40,7 @@ export function NextAppointmentCard({ appointment }: NextAppointmentCardProps) {
           </span>
           <span className="flex items-center gap-2">
             <User className="size-4 text-primary" />
-            Barbeiro: {barber?.name.split(' ')[0]}
+            Barbeiro: {appointment.barberName?.split(' ')[0] ?? '-'}
           </span>
         </div>
 
