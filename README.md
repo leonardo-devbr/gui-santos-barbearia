@@ -10,41 +10,106 @@ Site e área do cliente para cadastro, autenticação e agendamento de horários
 - Base UI e Lucide Icons
 - MySQL 8 para persistência de clientes, sessões, catálogo e agendamentos
 
-## Executando localmente
+## Como rodar o projeto localmente
 
-Requisitos: Node.js 20.9 ou superior, npm e MySQL 8.
+Cada desenvolvedor terá seu próprio banco local. O banco e as senhas não são enviados ao GitHub; somente o schema e os dados iniciais ficam versionados.
 
-Instale as dependências e crie a configuração local:
+### 1. Instalar os requisitos
+
+- [Git](https://git-scm.com/downloads)
+- [Node.js](https://nodejs.org/) 20.9 ou superior, com npm
+- [MySQL Community Server 8](https://dev.mysql.com/downloads/installer/)
+
+Durante a instalação do MySQL, mantenha a porta `3306`, crie uma senha para o usuário `root` e guarde essa senha. O MySQL Workbench é opcional.
+
+Para conferir as instalações no PowerShell:
+
+```powershell
+git --version
+node --version
+npm --version
+```
+
+### 2. Clonar o repositório
+
+```powershell
+git clone https://github.com/leonardo-devbr/gui-santos-barbearia.git
+cd gui-santos-barbearia
+```
+
+### 3. Instalar as dependências
 
 ```powershell
 npm install
+```
+
+### 4. Criar a configuração local
+
+Copie o arquivo de exemplo:
+
+```powershell
 Copy-Item .env.example .env.local
 ```
 
-Edite `.env.local` e informe a senha definida na instalação do MySQL. Em seguida, crie as tabelas e carregue o catálogo inicial:
+Abra `.env.local` e substitua somente a senha:
+
+```env
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD="SENHA_CRIADA_NA_INSTALACAO"
+MYSQL_DATABASE=gui_santos_barbearia
+```
+
+Não remova as aspas da senha e nunca envie `.env.local` ao GitHub.
+
+### 5. Criar o banco, as tabelas e os dados iniciais
+
+Com o serviço do MySQL em execução:
 
 ```powershell
+npm run db:setup
+```
+
+O resultado esperado é:
+
+```text
+Banco gui_santos_barbearia preparado com sucesso.
+```
+
+Esse comando pode ser executado novamente com segurança. Ele mantém clientes e agendamentos existentes e atualiza o catálogo inicial de serviços e barbeiros.
+
+### 6. Iniciar o site
+
+```powershell
+npm run dev
+```
+
+Abra [http://localhost:3000](http://localhost:3000). Para encerrar o servidor, volte ao terminal e pressione `Ctrl + C`.
+
+### Atualizando uma cópia já existente
+
+Depois que outro desenvolvedor enviar alterações ao repositório:
+
+```powershell
+git pull origin main
+npm install
 npm run db:setup
 npm run dev
 ```
 
-O comando `db:setup` é idempotente: ele cria o banco `gui_santos_barbearia`, mantém dados existentes e atualiza os serviços e barbeiros iniciais. O projeto ficará disponível em `http://localhost:3000`.
+Executar `npm install` e `npm run db:setup` após o `git pull` garante que novas dependências e alterações no banco sejam aplicadas localmente.
 
-As variáveis disponíveis são:
+### Erros comuns
 
-| Variável | Padrão |
-| --- | --- |
-| `MYSQL_HOST` | `127.0.0.1` |
-| `MYSQL_PORT` | `3306` |
-| `MYSQL_USER` | `root` |
-| `MYSQL_PASSWORD` | sem valor padrão |
-| `MYSQL_DATABASE` | `gui_santos_barbearia` |
+- `Access denied for user 'root'`: a senha em `.env.local` não corresponde à senha do MySQL.
+- `ECONNREFUSED 127.0.0.1:3306`: o serviço do MySQL não está iniciado ou está usando outra porta.
+- `EADDRINUSE`: a porta do site já está ocupada; encerre o outro processo ou abra a porta alternativa mostrada pelo Next.js.
+- `npm.ps1 cannot be loaded`: use `npm.cmd` no lugar de `npm` ou ajuste a política de execução do PowerShell.
 
-O arquivo `.env.local` não é versionado. Em produção, use um usuário próprio da aplicação com acesso somente ao banco do projeto.
+### Validação antes de enviar alterações
 
-Antes de publicar uma mudança, execute:
-
-```bash
+```powershell
 npm run lint
 npm run typecheck
 npm run build
