@@ -10,6 +10,10 @@ export interface Service {
   category: 'cortes' | 'barba' | 'combos' | 'acabamentos'
 }
 
+export interface AdminService extends Service {
+  isActive: boolean
+}
+
 export interface Barber {
   id: string
   name: string

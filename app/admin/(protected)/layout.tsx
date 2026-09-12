@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { CalendarDays, CalendarOff, LayoutDashboard, ShieldCheck } from 'lucide-react'
+import { CalendarDays, CalendarOff, LayoutDashboard, Scissors, ShieldCheck } from 'lucide-react'
 import { AdminLogoutButton } from '@/components/admin/admin-logout-button'
 import { getAuthenticatedAdmin } from '@/lib/admin-auth'
 
@@ -45,6 +45,13 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
             >
               <CalendarOff className="size-4" />
               Bloqueios
+            </Link>
+            <Link
+              href="/admin/servicos"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Scissors className="size-4" />
+              Serviços
             </Link>
           </nav>
 
