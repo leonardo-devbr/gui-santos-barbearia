@@ -43,6 +43,35 @@ CREATE TABLE IF NOT EXISTS barbers (
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS staff_users (
+  id CHAR(36) NOT NULL,
+  name VARCHAR(80) NOT NULL,
+  email VARCHAR(254) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  role ENUM('admin', 'barber') NOT NULL DEFAULT 'barber',
+  barber_id VARCHAR(64) NULL,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY staff_users_email_unique (email),
+  KEY staff_users_barber_id_index (barber_id),
+  CONSTRAINT staff_users_barber_id_fk
+    FOREIGN KEY (barber_id) REFERENCES barbers (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS staff_sessions (
+  token_hash CHAR(64) NOT NULL,
+  staff_user_id CHAR(36) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (token_hash),
+  KEY staff_sessions_user_id_index (staff_user_id),
+  KEY staff_sessions_expires_at_index (expires_at),
+  CONSTRAINT staff_sessions_user_id_fk
+    FOREIGN KEY (staff_user_id) REFERENCES staff_users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS sessions (
   token_hash CHAR(64) NOT NULL,
   customer_id CHAR(36) NOT NULL,
