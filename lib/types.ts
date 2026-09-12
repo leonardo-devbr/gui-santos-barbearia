@@ -24,6 +24,10 @@ export interface Barber {
   photoUrl: string
 }
 
+export interface AdminBarber extends Barber {
+  isActive: boolean
+}
+
 export type AppointmentStatus = 'confirmado' | 'pendente' | 'concluido' | 'cancelado'
 
 export interface Appointment {

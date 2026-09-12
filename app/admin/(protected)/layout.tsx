@@ -1,6 +1,13 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { CalendarDays, CalendarOff, LayoutDashboard, Scissors, ShieldCheck } from 'lucide-react'
+import {
+  CalendarDays,
+  CalendarOff,
+  LayoutDashboard,
+  Scissors,
+  ShieldCheck,
+  UsersRound,
+} from 'lucide-react'
 import { AdminLogoutButton } from '@/components/admin/admin-logout-button'
 import { getAuthenticatedAdmin } from '@/lib/admin-auth'
 
@@ -24,7 +31,7 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
             </div>
           </Link>
 
-          <nav className="flex items-center gap-1" aria-label="Painel administrativo">
+          <nav className="flex flex-wrap items-center justify-center gap-1" aria-label="Painel administrativo">
             <Link
               href="/admin"
               className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -52,6 +59,13 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
             >
               <Scissors className="size-4" />
               Serviços
+            </Link>
+            <Link
+              href="/admin/barbeiros"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <UsersRound className="size-4" />
+              Barbeiros
             </Link>
           </nav>
 
