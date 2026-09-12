@@ -25,7 +25,7 @@ export function ProfileForm({ customer }: { customer: CustomerProfile }) {
   const router = useRouter()
   const [form, setForm] = useState({
     name: customer.name,
-    phone: customer.phone,
+    phone: formatPhone(customer.phone),
     email: customer.email,
     birthDate: customer.birthDate,
     preferredCut: customer.preferredCut,

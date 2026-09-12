@@ -3,14 +3,17 @@ import { Gem } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { LogoutButton } from '@/components/logout-button'
 import { ProfileForm } from '@/components/profile/profile-form'
-import { currentCustomer } from '@/data/customer'
 import { getCurrentTier } from '@/data/loyalty'
+import { getAuthenticatedCustomer } from '@/lib/auth'
 
 export const metadata: Metadata = {
   title: 'Meu perfil | Gui Santos Barbearia',
 }
 
-export default function PerfilPage() {
+export default async function PerfilPage() {
+  const currentCustomer = await getAuthenticatedCustomer()
+  if (!currentCustomer) return null
+
   const { current } = getCurrentTier(currentCustomer.loyaltyPoints)
 
   return (
