@@ -137,7 +137,7 @@ npm run build
 
 ## Estado da integração
 
-O backend usa Route Handlers do Next.js e MySQL. Cadastro, login, logout, perfil, catálogo, disponibilidade, criação, remarcação, cancelamento e histórico de agendamentos estão conectados ao banco. O painel administrativo também usa o MySQL para autenticação da equipe, indicadores, agenda diária e bloqueios de disponibilidade.
+O backend usa Route Handlers do Next.js e MySQL. Cadastro, login, logout, perfil, catálogo, disponibilidade, criação, remarcação, cancelamento e histórico de agendamentos estão conectados ao banco. O painel administrativo também usa o MySQL para autenticação da equipe, indicadores, agenda diária, bloqueios, catálogo, equipe e configurações do estabelecimento.
 
 As senhas usam derivação `scrypt`. Sessões e tokens de recuperação ficam no MySQL, enquanto o navegador recebe apenas um cookie de sessão `HttpOnly`. A confirmação de um horário ocorre dentro de uma transação que bloqueia o barbeiro selecionado e verifica novamente qualquer sobreposição.
 
@@ -205,8 +205,26 @@ Clientes e administradores possuem contas, sessões, cookies e telas de login in
 | `PATCH` | `/api/admin/appointments/:id` | `{ "status" }` | Marca um atendimento como `concluido` ou `cancelado`. |
 | `POST` | `/api/admin/schedule-blocks` | Dados do período | Bloqueia um dia ou intervalo para um barbeiro ou toda a equipe. |
 | `DELETE` | `/api/admin/schedule-blocks/:id` | Sem corpo | Remove um bloqueio futuro. |
+| `POST` | `/api/admin/services` | Dados do serviço | Cria um serviço com preço, duração e categoria. |
+| `PATCH` | `/api/admin/services/:id` | Dados do serviço | Edita ou ativa/desativa um serviço. |
+| `POST` | `/api/admin/barbers` | Dados do barbeiro | Cria um perfil profissional. |
+| `PATCH` | `/api/admin/barbers/:id` | Dados do barbeiro | Edita ou ativa/desativa um barbeiro. |
+| `PATCH` | `/api/admin/business` | Dados do estabelecimento | Atualiza contato, endereço e localização. |
+| `PUT` | `/api/admin/business-hours` | `{ "hours": [...] }` | Atualiza os sete dias de funcionamento. |
+| `POST` | `/api/admin/users` | `{ "name", "email", "password" }` | Cria outro administrador. |
+| `PATCH` | `/api/admin/users/:id` | Dados da conta | Edita, redefine a senha ou desativa um administrador. |
 
-No navegador, `/admin` exibe os indicadores e a agenda de hoje, `/admin/agendamentos` permite consultar qualquer data e `/admin/bloqueios` gerencia folgas, pausas e feriados. Os bloqueios são validados novamente pelo backend ao criar ou remarcar um agendamento.
+No navegador, o painel possui as seguintes áreas:
+
+- `/admin`: indicadores e agenda de hoje;
+- `/admin/agendamentos`: consulta da agenda por data;
+- `/admin/bloqueios`: folgas, pausas, feriados e indisponibilidades;
+- `/admin/servicos`: serviços, preços, duração e disponibilidade;
+- `/admin/barbeiros`: perfis e disponibilidade da equipe;
+- `/admin/configuracoes`: contato, endereço, mapa e horários de funcionamento;
+- `/admin/administradores`: contas administrativas e redefinição de acesso.
+
+Serviços e barbeiros são desativados, não apagados, preservando o histórico dos agendamentos. Horários e bloqueios são validados novamente pelo backend ao criar ou remarcar uma reserva. O administrador atual não pode desativar a própria conta, e a troca de senha invalida sessões anteriores.
 
 ### Perfil
 
