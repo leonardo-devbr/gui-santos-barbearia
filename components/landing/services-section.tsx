@@ -1,9 +1,9 @@
 import Link from 'next/link'
 import { Scissors, Sparkles, Layers, Eye, Wand2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { services } from '@/data/services'
 import { formatPrice } from '@/lib/format'
 import { getLoginHref } from '@/lib/navigation'
+import type { Service } from '@/lib/types'
 
 const serviceIcons: Record<string, typeof Scissors> = {
   corte: Scissors,
@@ -14,7 +14,7 @@ const serviceIcons: Record<string, typeof Scissors> = {
   'corte-infantil': Scissors,
 }
 
-export function ServicesSection() {
+export function ServicesSection({ services }: { services: Service[] }) {
   const featured = services.slice(0, 5)
 
   return (

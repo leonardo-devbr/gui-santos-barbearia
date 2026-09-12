@@ -33,6 +33,13 @@ export interface Appointment {
   durationMinutes: number
 }
 
+export const serviceCategoryLabels: Record<Service['category'], string> = {
+  cortes: 'Cortes',
+  barba: 'Barba',
+  combos: 'Combos',
+  acabamentos: 'Acabamentos',
+}
+
 export interface TimeSlot {
   time: string // HH:mm
   available: boolean

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { BookingFlow } from '@/components/booking/booking-flow'
+import { getBarbers, getServices } from '@/lib/catalog'
 
 export const metadata: Metadata = {
   title: 'Agendar horário | Gui Santos Barbearia',
@@ -12,6 +13,7 @@ export default async function AgendarPage({
 }) {
   const { agendamento, servico, barbeiro } = await searchParams
   const isRescheduling = Boolean(agendamento)
+  const [services, barbers] = await Promise.all([getServices(), getBarbers()])
 
   return (
     <div className="flex flex-col gap-8 px-6 py-8 sm:px-8 lg:px-10 lg:py-10">
@@ -24,7 +26,13 @@ export default async function AgendarPage({
         </p>
       </div>
 
-      <BookingFlow appointmentId={agendamento} initialServiceId={servico} initialBarberId={barbeiro} />
+      <BookingFlow
+        services={services}
+        barbers={barbers}
+        appointmentId={agendamento}
+        initialServiceId={servico}
+        initialBarberId={barbeiro}
+      />
     </div>
   )
 }

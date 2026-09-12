@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { ServiceCard } from '@/components/service-card'
-import { services, categoryLabels } from '@/data/services'
-import type { Service } from '@/lib/types'
+import { getServices } from '@/lib/catalog'
+import { serviceCategoryLabels, type Service } from '@/lib/types'
 
 export const metadata: Metadata = {
   title: 'Serviços | Gui Santos Barbearia',
@@ -11,7 +11,8 @@ export const metadata: Metadata = {
 
 const categoryOrder: Service['category'][] = ['cortes', 'barba', 'combos', 'acabamentos']
 
-export default function ServicosPage() {
+export default async function ServicosPage() {
+  const services = await getServices()
   const grouped = categoryOrder
     .map((category) => ({
       category,
@@ -31,7 +32,7 @@ export default function ServicosPage() {
       {grouped.map((group) => (
         <section key={group.category} className="flex flex-col gap-4">
           <h2 className="text-sm font-medium tracking-wide text-muted-foreground">
-            {categoryLabels[group.category]}
+            {serviceCategoryLabels[group.category]}
           </h2>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {group.items.map((service) => (

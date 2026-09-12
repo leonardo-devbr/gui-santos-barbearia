@@ -2,13 +2,15 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { BarberCard } from '@/components/barber-card'
-import { barbers } from '@/data/barbers'
+import { getBarbers } from '@/lib/catalog'
 
 export const metadata: Metadata = {
   title: 'Barbeiros | Gui Santos Barbearia',
 }
 
-export default function BarbeirosPage() {
+export default async function BarbeirosPage() {
+  const barbers = await getBarbers()
+
   return (
     <div className="flex flex-col gap-8 px-6 py-8 sm:px-8 lg:px-10 lg:py-10">
       <div className="flex flex-col gap-1">

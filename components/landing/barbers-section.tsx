@@ -2,10 +2,10 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { Star } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { barbers } from '@/data/barbers'
 import { getLoginHref } from '@/lib/navigation'
+import type { Barber } from '@/lib/types'
 
-export function BarbersSection() {
+export function BarbersSection({ barbers }: { barbers: Barber[] }) {
   return (
     <section className="mx-auto max-w-6xl px-6 py-24">
       <div className="flex flex-col gap-3">
