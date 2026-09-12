@@ -10,9 +10,7 @@ import { ServiceCard } from '@/components/service-card'
 import { BarberCard } from '@/components/barber-card'
 import { cn } from '@/lib/utils'
 import { formatDateLong, formatPrice } from '@/lib/format'
-import { services, getServiceById } from '@/data/services'
-import { barbers, getBarberById } from '@/data/barbers'
-import type { TimeSlot } from '@/lib/types'
+import type { Barber, Service, TimeSlot } from '@/lib/types'
 
 const steps = ['Serviço', 'Barbeiro', 'Data', 'Horário', 'Confirmar'] as const
 
@@ -40,6 +38,8 @@ function getNextDays(count: number) {
 }
 
 interface BookingFlowProps {
+  services: Service[]
+  barbers: Barber[]
   appointmentId?: string
   initialServiceId?: string
   initialBarberId?: string
@@ -65,12 +65,22 @@ function isTimeSlot(value: unknown): value is TimeSlot {
   )
 }
 
-export function BookingFlow({ appointmentId, initialServiceId, initialBarberId }: BookingFlowProps) {
+export function BookingFlow({
+  services,
+  barbers,
+  appointmentId,
+  initialServiceId,
+  initialBarberId,
+}: BookingFlowProps) {
   const router = useRouter()
   const days = useMemo(() => getNextDays(12), [])
   const isRescheduling = Boolean(appointmentId)
-  const validInitialServiceId = initialServiceId && getServiceById(initialServiceId) ? initialServiceId : undefined
-  const validInitialBarberId = initialBarberId && getBarberById(initialBarberId) ? initialBarberId : undefined
+  const validInitialServiceId = initialServiceId && services.some((service) => service.id === initialServiceId)
+    ? initialServiceId
+    : undefined
+  const validInitialBarberId = initialBarberId && barbers.some((barber) => barber.id === initialBarberId)
+    ? initialBarberId
+    : undefined
 
   const [step, setStep] = useState(0)
   const [serviceId, setServiceId] = useState<string | undefined>(validInitialServiceId)
@@ -84,8 +94,8 @@ export function BookingFlow({ appointmentId, initialServiceId, initialBarberId }
   const [isSubmitting, setIsSubmitting] = useState(false)
   const availabilityRequestId = useRef(0)
 
-  const service = serviceId ? getServiceById(serviceId) : undefined
-  const barber = barberId ? getBarberById(barberId) : undefined
+  const service = serviceId ? services.find((item) => item.id === serviceId) : undefined
+  const barber = barberId ? barbers.find((item) => item.id === barberId) : undefined
 
   const canAdvance =
     (step === 0 && Boolean(serviceId)) ||
