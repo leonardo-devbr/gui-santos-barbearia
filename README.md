@@ -1,6 +1,6 @@
 # Gui Santos Barbearia
 
-Site e área do cliente para cadastro, autenticação e agendamento de horários da Gui Santos Barbearia.
+Site, área do cliente e painel administrativo para a gestão de horários da Gui Santos Barbearia.
 
 ## Tecnologias
 
@@ -79,13 +79,33 @@ Banco gui_santos_barbearia preparado com sucesso.
 
 Esse comando pode ser executado novamente com segurança. Ele mantém clientes e agendamentos existentes e atualiza o catálogo inicial de serviços e barbeiros.
 
-### 6. Iniciar o site
+### 6. Criar o primeiro administrador
+
+Depois de executar `db:setup`, acrescente temporariamente estas variáveis ao final do `.env.local`:
+
+```env
+ADMIN_NAME="Nome do administrador"
+ADMIN_EMAIL="admin@seudominio.com"
+ADMIN_PASSWORD="uma-senha-forte-com-12-ou-mais-caracteres-e-1-numero"
+```
+
+A senha deve ter entre 12 e 128 caracteres, com pelo menos uma letra e um número. Em seguida, execute:
+
+```powershell
+npm run admin:create
+```
+
+O comando pode ser repetido para atualizar o nome ou a senha do mesmo e-mail. Depois da criação, remova `ADMIN_PASSWORD` do `.env.local`; a senha já estará armazenada no MySQL somente como hash.
+
+Não existe cadastro público de administradores. Cada ambiente local ou servidor precisa executar esse comando ao menos uma vez para obter acesso ao painel.
+
+### 7. Iniciar o site
 
 ```powershell
 npm run dev
 ```
 
-Abra [http://localhost:3000](http://localhost:3000). Para encerrar o servidor, volte ao terminal e pressione `Ctrl + C`.
+Abra [http://localhost:3000](http://localhost:3000). O painel usa um login separado em [http://localhost:3000/admin/login](http://localhost:3000/admin/login). Para encerrar o servidor, volte ao terminal e pressione `Ctrl + C`.
 
 ### Atualizando uma cópia já existente
 
@@ -117,7 +137,7 @@ npm run build
 
 ## Estado da integração
 
-O backend usa Route Handlers do Next.js e MySQL. Cadastro, login, logout, perfil, catálogo, disponibilidade, criação, remarcação, cancelamento e histórico de agendamentos estão conectados ao banco.
+O backend usa Route Handlers do Next.js e MySQL. Cadastro, login, logout, perfil, catálogo, disponibilidade, criação, remarcação, cancelamento e histórico de agendamentos estão conectados ao banco. O painel administrativo também usa o MySQL para autenticação da equipe, indicadores, agenda diária e bloqueios de disponibilidade.
 
 As senhas usam derivação `scrypt`. Sessões e tokens de recuperação ficam no MySQL, enquanto o navegador recebe apenas um cookie de sessão `HttpOnly`. A confirmação de um horário ocorre dentro de uma transação que bloqueia o barbeiro selecionado e verifica novamente qualquer sobreposição.
 
@@ -173,6 +193,21 @@ Resposta de sucesso:
 
 A disponibilidade exibida no navegador é apenas informativa. Ao criar ou remarcar, o backend valida novamente o horário dentro de uma transação para impedir dois agendamentos simultâneos para o mesmo barbeiro.
 
+### Administração
+
+Clientes e administradores possuem contas, sessões, cookies e telas de login independentes. As rotas abaixo exigem uma sessão administrativa válida:
+
+| Método | Rota | Corpo | Comportamento |
+| --- | --- | --- | --- |
+| `POST` | `/api/admin/auth/login` | `{ "email", "password" }` | Inicia uma sessão administrativa. |
+| `POST` | `/api/admin/auth/logout` | Sem corpo | Encerra a sessão administrativa. |
+| `GET` | `/api/admin/appointments?date=YYYY-MM-DD` | Sem corpo | Lista a agenda completa da data, incluindo os dados do cliente. |
+| `PATCH` | `/api/admin/appointments/:id` | `{ "status" }` | Marca um atendimento como `concluido` ou `cancelado`. |
+| `POST` | `/api/admin/schedule-blocks` | Dados do período | Bloqueia um dia ou intervalo para um barbeiro ou toda a equipe. |
+| `DELETE` | `/api/admin/schedule-blocks/:id` | Sem corpo | Remove um bloqueio futuro. |
+
+No navegador, `/admin` exibe os indicadores e a agenda de hoje, `/admin/agendamentos` permite consultar qualquer data e `/admin/bloqueios` gerencia folgas, pausas e feriados. Os bloqueios são validados novamente pelo backend ao criar ou remarcar um agendamento.
+
 ### Perfil
 
 `PATCH /api/customers/me`
@@ -205,6 +240,8 @@ Essa rota exige autenticação e só pode alterar o perfil vinculado à sessão 
 - Normalizar e garantir a unicidade do e-mail.
 - Validar todos os payloads também no servidor; a validação do navegador é apenas de experiência de uso.
 - Exigir autenticação nas rotas de perfil, disponibilidade privada e agendamentos.
+- Manter autenticação e cookies administrativos separados das contas dos clientes.
+- Impedir reservas que coincidam com bloqueios administrativos de agenda.
 - Verificar se o agendamento pertence ao cliente antes de remarcar ou cancelar.
 - Usar transação e bloqueio adequado ao confirmar horários, considerando a duração do serviço.
 - Retornar `401` para sessão ausente/inválida, `403` para acesso indevido, `404` para recurso inexistente, `409` para conflito de horário e `422` para dados inválidos.
