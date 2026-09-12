@@ -1,19 +1,4 @@
-import type { CustomerProfile, Review } from '@/lib/types'
-
-// Dados mockados. Em uma futura integração, este arquivo será substituído
-// por uma chamada a GET /api/customers/me.
-export const currentCustomer: CustomerProfile = {
-  id: 'cliente-001',
-  name: 'João Pedro',
-  phone: '(11) 98765-4321',
-  email: 'joao.pedro@email.com',
-  birthDate: '1994-03-12',
-  photoUrl: '/placeholder-user.jpg',
-  preferredCut: 'Degradê médio',
-  beardStyle: 'Barba média',
-  notes: 'Prefere acabamento natural.',
-  loyaltyPoints: 320,
-}
+import type { Review } from '@/lib/types'
 
 export const reviews: Review[] = [
   {
