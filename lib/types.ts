@@ -41,6 +41,16 @@ export interface AdminAppointment extends Appointment {
   customerEmail: string
 }
 
+export interface ScheduleBlock {
+  id: string
+  barberId: string | null
+  barberName: string
+  date: string
+  startTime: string | null
+  endTime: string | null
+  reason: string
+}
+
 export const serviceCategoryLabels: Record<Service['category'], string> = {
   cortes: 'Cortes',
   barba: 'Barba',

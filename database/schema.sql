@@ -128,6 +128,29 @@ CREATE TABLE IF NOT EXISTS appointments (
     FOREIGN KEY (barber_id) REFERENCES barbers (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS schedule_blocks (
+  id CHAR(36) NOT NULL,
+  barber_id VARCHAR(64) NULL,
+  block_date DATE NOT NULL,
+  start_time TIME NULL,
+  end_time TIME NULL,
+  reason VARCHAR(160) NOT NULL,
+  created_by CHAR(36) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY schedule_blocks_date_index (block_date, start_time),
+  KEY schedule_blocks_barber_date_index (barber_id, block_date),
+  KEY schedule_blocks_created_by_index (created_by),
+  CONSTRAINT schedule_blocks_barber_id_fk
+    FOREIGN KEY (barber_id) REFERENCES barbers (id) ON DELETE CASCADE,
+  CONSTRAINT schedule_blocks_created_by_fk
+    FOREIGN KEY (created_by) REFERENCES staff_users (id) ON DELETE RESTRICT,
+  CONSTRAINT schedule_blocks_time_range_check CHECK (
+    (start_time IS NULL AND end_time IS NULL)
+    OR (start_time IS NOT NULL AND end_time IS NOT NULL AND start_time < end_time)
+  )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 INSERT INTO services (id, name, description, duration_minutes, price, category)
 VALUES
   ('corte', 'Corte', 'Degradê, social ou corte tradicional.', 45, 40.00, 'cortes'),

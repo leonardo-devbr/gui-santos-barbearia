@@ -34,6 +34,11 @@ interface BusySlotRow extends RowDataPacket {
   duration_minutes: number
 }
 
+interface ScheduleBlockRow extends RowDataPacket {
+  start_time: string | null
+  end_time: string | null
+}
+
 interface OwnedAppointmentRow extends RowDataPacket {
   id: string
   barber_id: string
@@ -218,15 +223,23 @@ export async function getAvailability({
     parameters.push(excludedAppointmentId)
   }
 
-  const [busySlots] = await pool.execute<BusySlotRow[]>(
-    `SELECT appointment_time, duration_minutes
-     FROM appointments
-     WHERE barber_id = ?
-       AND appointment_date = ?
-       AND status IN ('confirmado', 'pendente')
-       ${exclusionClause}`,
-    parameters,
-  )
+  const [[busySlots], [scheduleBlocks]] = await Promise.all([
+    pool.execute<BusySlotRow[]>(
+      `SELECT appointment_time, duration_minutes
+       FROM appointments
+       WHERE barber_id = ?
+         AND appointment_date = ?
+         AND status IN ('confirmado', 'pendente')
+         ${exclusionClause}`,
+      parameters,
+    ),
+    pool.execute<ScheduleBlockRow[]>(
+      `SELECT start_time, end_time
+       FROM schedule_blocks
+       WHERE block_date = ? AND (barber_id = ? OR barber_id IS NULL)`,
+      [date, barberId],
+    ),
+  ])
   const now = getNowInSaoPaulo()
   const slots: TimeSlot[] = []
 
@@ -242,8 +255,15 @@ export async function getAvailability({
       const busyEnd = busyStart + busySlot.duration_minutes
       return start < busyEnd && start + service.duration_minutes > busyStart
     })
+    const isBlocked = scheduleBlocks.some((block) => {
+      if (!block.start_time || !block.end_time) return true
 
-    slots.push({ time, available: isFuture && !overlaps })
+      const blockStart = timeToMinutes(block.start_time.slice(0, 5))
+      const blockEnd = timeToMinutes(block.end_time.slice(0, 5))
+      return start < blockEnd && start + service.duration_minutes > blockStart
+    })
+
+    slots.push({ time, available: isFuture && !overlaps && !isBlocked })
   }
 
   return slots
@@ -306,9 +326,37 @@ async function ensureNoConflict(
   }
 }
 
+async function ensureNoScheduleBlock(
+  connection: PoolConnection,
+  input: AppointmentInput,
+  durationMinutes: number,
+) {
+  const [blocks] = await connection.execute<IdRow[]>(
+    `SELECT id
+     FROM schedule_blocks
+     WHERE block_date = ?
+       AND (barber_id = ? OR barber_id IS NULL)
+       AND (
+         (start_time IS NULL AND end_time IS NULL)
+         OR (
+           TIME_TO_SEC(start_time) < TIME_TO_SEC(?) + ? * 60
+           AND TIME_TO_SEC(end_time) > TIME_TO_SEC(?)
+         )
+       )
+     LIMIT 1
+     FOR UPDATE`,
+    [input.date, input.barberId, `${input.time}:00`, durationMinutes, `${input.time}:00`],
+  )
+
+  if (blocks[0]) {
+    throw new AppointmentError('O barbeiro não está disponível neste período.', 409)
+  }
+}
+
 export async function createAppointment(customerId: string, input: AppointmentInput) {
   return withTransaction(async (connection) => {
     const service = await getBookingResources(connection, input)
+    await ensureNoScheduleBlock(connection, input, service.duration_minutes)
     await ensureNoConflict(connection, input, service.duration_minutes)
 
     const id = randomUUID()
@@ -358,6 +406,7 @@ export async function rescheduleAppointment(
     }
 
     const service = await getBookingResources(connection, input)
+    await ensureNoScheduleBlock(connection, input, service.duration_minutes)
     await ensureNoConflict(connection, input, service.duration_minutes, appointmentId)
 
     await connection.execute<ResultSetHeader>(
