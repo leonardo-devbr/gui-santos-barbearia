@@ -1,8 +1,13 @@
 import type React from 'react'
+import { redirect } from 'next/navigation'
 import { AppSidebar } from '@/components/app-sidebar'
 import { BottomNavigation } from '@/components/bottom-navigation'
+import { getAuthenticatedCustomer } from '@/lib/auth'
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({ children }: { children: React.ReactNode }) {
+  const customer = await getAuthenticatedCustomer()
+  if (!customer) redirect('/login')
+
   return (
     <div className="flex min-h-screen bg-background">
       <AppSidebar />

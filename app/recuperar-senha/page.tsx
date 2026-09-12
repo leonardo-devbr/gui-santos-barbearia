@@ -11,6 +11,7 @@ import { isValidEmail, normalizeEmail } from '@/lib/validation'
 
 interface RecoveryResponse {
   message?: string
+  developmentResetUrl?: string
 }
 
 export default function RecoverPasswordPage() {
@@ -18,6 +19,7 @@ export default function RecoverPasswordPage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isSent, setIsSent] = useState(false)
+  const [developmentResetUrl, setDevelopmentResetUrl] = useState<string | null>(null)
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -47,6 +49,7 @@ export default function RecoverPasswordPage() {
         return
       }
 
+      setDevelopmentResetUrl(result?.developmentResetUrl ?? null)
       setIsSent(true)
     } catch {
       setSubmitError('Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.')
@@ -68,6 +71,16 @@ export default function RecoverPasswordPage() {
               Se houver uma conta vinculada ao endereço informado, você receberá as instruções para redefinir sua senha.
             </p>
           </div>
+          {developmentResetUrl && (
+            <Button
+              render={<Link href={developmentResetUrl} />}
+              nativeButton={false}
+              size="lg"
+              className="w-full"
+            >
+              Abrir link de desenvolvimento
+            </Button>
+          )}
           <Button render={<Link href="/login" />} nativeButton={false} size="lg" className="w-full">
             Voltar para o login
           </Button>
