@@ -17,7 +17,9 @@ type ProfileField =
 
 function validateProfile(body: Record<string, unknown>) {
   const name = typeof body.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : ''
-  const phone = typeof body.phone === 'string' ? normalizePhone(body.phone) : ''
+  const rawPhone = typeof body.phone === 'string' ? body.phone : ''
+  const phoneDigits = rawPhone.replace(/\D/g, '')
+  const phone = normalizePhone(rawPhone)
   const email = typeof body.email === 'string' ? normalizeEmail(body.email) : ''
   const birthDate = typeof body.birthDate === 'string' ? body.birthDate.trim() : ''
   const preferredCut = typeof body.preferredCut === 'string' ? body.preferredCut.trim() : ''
@@ -28,7 +30,9 @@ function validateProfile(body: Record<string, unknown>) {
   if (name.length < 3) errors.name = 'Informe seu nome completo.'
   else if (name.length > 80) errors.name = 'O nome deve ter no máximo 80 caracteres.'
 
-  if (phone.length < 10 || phone.length > 11) errors.phone = 'Informe um telefone com DDD.'
+  if (phoneDigits.length < 10 || phoneDigits.length > 11) {
+    errors.phone = 'Informe um telefone com DDD.'
+  }
   if (!isValidEmail(email) || email.length > 254) errors.email = 'Informe um e-mail válido.'
 
   if (birthDate && (!isValidIsoDate(birthDate) || birthDate > getTodayInSaoPaulo())) {

@@ -10,6 +10,9 @@ interface LoginRow extends RowDataPacket {
   password_hash: string
 }
 
+const dummyPasswordHash =
+  'scrypt$6f9c8f460f4ef207d0f9247cd41b278a$0fc89881f74eb107e9ec634f863fe5e385e8ab4a9a7122b75eb0edd877acdeac17245f5ea57b8d7f9bc5b31e645d79f86ea4f1e599a6163f4e5953343b0a1be3'
+
 export async function POST(request: Request) {
   const body = await readJsonObject(request)
   if (!body) return errorResponse('Envie suas credenciais em JSON.', 400)
@@ -32,8 +35,9 @@ export async function POST(request: Request) {
       [email],
     )
     const customer = rows[0]
+    const passwordMatches = await verifyPassword(password, customer?.password_hash ?? dummyPasswordHash)
 
-    if (!customer || !(await verifyPassword(password, customer.password_hash))) {
+    if (!customer || !passwordMatches) {
       return errorResponse('E-mail ou senha incorretos.', 401)
     }
 
