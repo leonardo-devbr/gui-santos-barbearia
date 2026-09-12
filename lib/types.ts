@@ -87,6 +87,14 @@ export interface BusinessConfiguration {
   hours: BusinessHour[]
 }
 
+export interface AdminUser {
+  id: string
+  name: string
+  email: string
+  isActive: boolean
+  isCurrent: boolean
+}
+
 export const serviceCategoryLabels: Record<Service['category'], string> = {
   cortes: 'Cortes',
   barba: 'Barba',
