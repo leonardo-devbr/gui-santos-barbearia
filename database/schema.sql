@@ -202,7 +202,7 @@ CREATE TABLE IF NOT EXISTS email_notifications (
   html_body MEDIUMTEXT NOT NULL,
   status ENUM('pending', 'processing', 'sent', 'failed') NOT NULL DEFAULT 'pending',
   attempt_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
-  scheduled_for DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  scheduled_for DATETIME NOT NULL,
   sent_at DATETIME NULL,
   last_error VARCHAR(500) NULL,
   dedupe_key VARCHAR(160) NULL,

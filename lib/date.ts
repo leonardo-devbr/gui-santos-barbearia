@@ -7,6 +7,12 @@ export function getTodayInSaoPaulo() {
   }).format(new Date())
 }
 
+export function addDaysToIsoDate(date: string, days: number) {
+  const result = new Date(`${date}T12:00:00.000Z`)
+  result.setUTCDate(result.getUTCDate() + days)
+  return result.toISOString().slice(0, 10)
+}
+
 export function getNowInSaoPaulo() {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Sao_Paulo',

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { getBusinessConfiguration } from '@/lib/business'
 import { getPool, withTransaction } from '@/lib/db'
+import { addDaysToIsoDate, getTodayInSaoPaulo } from '@/lib/date'
 import { getPublicAppUrl, sendEmail } from '@/lib/email'
 import {
   createAppointmentEmail,
@@ -31,6 +32,14 @@ interface PendingNotificationRow extends RowDataPacket {
   html_body: string
   status: 'pending' | 'processing' | 'sent' | 'failed'
   attempt_count: number
+}
+
+interface AppointmentIdRow extends RowDataPacket {
+  id: string
+}
+
+interface NotificationIdRow extends RowDataPacket {
+  id: string
 }
 
 function getErrorMessage(error: unknown) {
@@ -83,8 +92,8 @@ async function createNotification(
     await getPool().execute<ResultSetHeader>(
       `INSERT INTO email_notifications
         (id, customer_id, appointment_id, notification_type, recipient_email,
-         recipient_name, subject, text_body, html_body, dedupe_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         recipient_name, subject, text_body, html_body, scheduled_for, dedupe_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), ?)`,
       [
         id,
         appointment.customer_id,
@@ -116,7 +125,9 @@ export async function deliverEmailNotification(id: string) {
       [id],
     )
     const row = rows[0]
-    if (!row || row.status === 'sent' || row.attempt_count >= 3) return null
+    if (!row || !['pending', 'failed'].includes(row.status) || row.attempt_count >= 3) {
+      return null
+    }
 
     await connection.execute<ResultSetHeader>(
       `UPDATE email_notifications
@@ -166,6 +177,57 @@ export async function notifyAppointment(appointmentId: string, type: Appointment
 
 export async function queueAppointmentReminder(appointmentId: string, dedupeKey: string) {
   return createNotification(appointmentId, 'appointment_reminder', dedupeKey)
+}
+
+export async function processAppointmentNotifications() {
+  const pool = getPool()
+  const reminderDate = addDaysToIsoDate(getTodayInSaoPaulo(), 1)
+
+  await pool.execute<ResultSetHeader>(
+    `UPDATE email_notifications
+     SET status = 'failed', last_error = 'Processamento interrompido antes da conclusão.'
+     WHERE status = 'processing'
+       AND updated_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 15 MINUTE)`,
+  )
+
+  const [appointments] = await pool.execute<AppointmentIdRow[]>(
+    `SELECT id
+     FROM appointments
+     WHERE appointment_date = ? AND status IN ('confirmado', 'pendente')
+     ORDER BY appointment_time ASC`,
+    [reminderDate],
+  )
+
+  let queued = 0
+  for (const appointment of appointments) {
+    const notificationId = await queueAppointmentReminder(
+      appointment.id,
+      `appointment-reminder:${appointment.id}:${reminderDate}`,
+    )
+    if (notificationId) queued += 1
+  }
+
+  const [notifications] = await pool.execute<NotificationIdRow[]>(
+    `SELECT id
+     FROM email_notifications
+     WHERE status IN ('pending', 'failed')
+       AND scheduled_for <= UTC_TIMESTAMP()
+       AND attempt_count < 3
+     ORDER BY scheduled_for ASC, created_at ASC
+     LIMIT 50`,
+  )
+  const results = await Promise.all(
+    notifications.map((notification) => deliverEmailNotification(notification.id)),
+  )
+  const sent = results.filter(Boolean).length
+
+  return {
+    reminderDate,
+    queued,
+    processed: notifications.length,
+    sent,
+    failed: notifications.length - sent,
+  }
 }
 
 function isDuplicateEntry(error: unknown) {
