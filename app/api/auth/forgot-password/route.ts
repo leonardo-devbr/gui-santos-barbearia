@@ -2,11 +2,16 @@ import { NextResponse } from 'next/server'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { createToken, hashToken } from '@/lib/auth'
 import { errorResponse, internalErrorResponse, readJsonObject } from '@/lib/api'
+import { getBusinessConfiguration } from '@/lib/business'
 import { getPool } from '@/lib/db'
+import { getPublicAppUrl, sendEmail } from '@/lib/email'
+import { createPasswordResetEmail } from '@/lib/email-templates'
 import { isValidEmail, normalizeEmail } from '@/lib/validation'
 
 interface CustomerIdRow extends RowDataPacket {
   id: string
+  name: string
+  email: string
 }
 
 const successMessage =
@@ -24,7 +29,7 @@ export async function POST(request: Request) {
   try {
     const pool = getPool()
     const [rows] = await pool.execute<CustomerIdRow[]>(
-      'SELECT id FROM customers WHERE email = ? LIMIT 1',
+      'SELECT id, name, email FROM customers WHERE email = ? LIMIT 1',
       [email],
     )
     const customer = rows[0]
@@ -43,12 +48,25 @@ export async function POST(request: Request) {
       [hashToken(token), customer.id, expiresAt],
     )
 
-    const developmentResetUrl =
-      process.env.NODE_ENV === 'production'
-        ? undefined
-        : `${new URL(request.url).origin}/redefinir-senha?token=${encodeURIComponent(token)}`
+    let developmentResetUrl: string | undefined
 
-    if (developmentResetUrl) console.info(`Link de recuperação local: ${developmentResetUrl}`)
+    try {
+      const resetUrl = `${getPublicAppUrl(request.url)}/redefinir-senha?token=${encodeURIComponent(token)}`
+      const { settings } = await getBusinessConfiguration()
+      const emailMessage = createPasswordResetEmail({
+        customerName: customer.name,
+        resetUrl,
+        businessName: settings.name,
+      })
+      await sendEmail({ to: customer.email, ...emailMessage })
+      developmentResetUrl = process.env.NODE_ENV === 'production' ? undefined : resetUrl
+    } catch (error) {
+      console.error('Falha ao enviar e-mail de recuperação:', error)
+      await pool.execute<ResultSetHeader>(
+        'DELETE FROM password_reset_tokens WHERE token_hash = ?',
+        [hashToken(token)],
+      )
+    }
 
     return NextResponse.json({ message: successMessage, developmentResetUrl })
   } catch (error) {
