@@ -9,6 +9,7 @@ Site, área do cliente e painel administrativo para a gestão de horários da Gu
 - Tailwind CSS 4
 - Base UI e Lucide Icons
 - MySQL 8 para persistência de clientes, sessões, catálogo e agendamentos
+- Nodemailer e SMTP para e-mails transacionais
 
 ## Como rodar o projeto localmente
 
@@ -99,13 +100,55 @@ O comando pode ser repetido para atualizar o nome ou a senha do mesmo e-mail. De
 
 Não existe cadastro público de administradores. Cada ambiente local ou servidor precisa executar esse comando ao menos uma vez para obter acesso ao painel.
 
-### 7. Iniciar o site
+### 7. Configurar e-mails e lembretes (opcional localmente)
+
+O site funciona localmente sem um provedor de e-mail. Mantenha `SMTP_HOST` e `SMTP_FROM` vazios para que as mensagens sejam exibidas como prévias no terminal, sem envio real.
+
+Para enviar mensagens de verdade, configure no `.env.local` as credenciais SMTP fornecidas pelo seu provedor:
+
+```env
+APP_URL=http://localhost:3000
+SMTP_HOST=smtp.seuprovedor.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=seu-usuario
+SMTP_PASSWORD="sua-senha-ou-chave-de-aplicativo"
+SMTP_FROM="Gui Santos Barbearia <nao-responda@seudominio.com>"
+```
+
+Use `SMTP_SECURE=true` com a porta `465`; na porta `587`, mantenha `false` para usar STARTTLS. Quando o provedor oferecer senha de aplicativo, use-a no lugar da senha normal da conta.
+
+Os lembretes e as novas tentativas de envio exigem um segredo. Gere um valor aleatório:
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+Copie o resultado para o `.env.local`:
+
+```env
+CRON_SECRET="valor-aleatorio-gerado"
+```
+
+### 8. Iniciar o site
 
 ```powershell
 npm run dev
 ```
 
 Abra [http://localhost:3000](http://localhost:3000). O painel usa um login separado em [http://localhost:3000/admin/login](http://localhost:3000/admin/login). Para encerrar o servidor, volte ao terminal e pressione `Ctrl + C`.
+
+### 9. Processar lembretes e novas tentativas
+
+Com o site em execução e `CRON_SECRET` configurado, abra outro terminal na pasta do projeto e execute:
+
+```powershell
+npm run notifications:process
+```
+
+O comando cria um lembrete para cada atendimento do dia seguinte, evita duplicações e tenta novamente mensagens pendentes ou com falha, até o limite de três tentativas.
+
+Em produção, configure o agendador da hospedagem para fazer uma requisição `POST` diária a `/api/notifications/process`, enviando o cabeçalho `Authorization: Bearer VALOR_DO_CRON_SECRET`. O segredo deve existir tanto no ambiente do site quanto no agendador.
 
 ### Atualizando uma cópia já existente
 
@@ -141,7 +184,9 @@ O backend usa Route Handlers do Next.js e MySQL. Cadastro, login, logout, perfil
 
 As senhas usam derivação `scrypt`. Sessões e tokens de recuperação ficam no MySQL, enquanto o navegador recebe apenas um cookie de sessão `HttpOnly`. A confirmação de um horário ocorre dentro de uma transação que bloqueia o barbeiro selecionado e verifica novamente qualquer sobreposição.
 
-Durante o desenvolvimento, a recuperação de senha mostra o link local na própria tela e no terminal. Em produção, o token continua sendo criado com segurança, mas será necessário conectar um serviço de envio de e-mail para entregar o link ao cliente.
+Recuperação de senha, confirmação, remarcação, cancelamento e lembrete de agendamento possuem e-mails próprios. Sem SMTP, o desenvolvimento mostra uma prévia no terminal e a recuperação de senha também apresenta o link local na tela. Em produção, `APP_URL` e as credenciais SMTP são obrigatórios para a entrega real.
+
+As notificações de agendamento são registradas em uma fila no MySQL. Uma indisponibilidade do provedor de e-mail não desfaz o agendamento: a mensagem fica marcada como falha e o processador pode tentar novamente até três vezes.
 
 Todas as requisições e respostas usam JSON. Em erros, a API responde com um status HTTP adequado e, sempre que possível, com este formato:
 
@@ -192,6 +237,14 @@ Resposta de sucesso:
 | `DELETE` | `/api/appointments/:id` | Sem corpo | Cancela um agendamento pertencente ao cliente autenticado. |
 
 A disponibilidade exibida no navegador é apenas informativa. Ao criar ou remarcar, o backend valida novamente o horário dentro de uma transação para impedir dois agendamentos simultâneos para o mesmo barbeiro.
+
+### Notificações
+
+| Método | Rota | Autorização | Comportamento |
+| --- | --- | --- | --- |
+| `POST` | `/api/notifications/process` | `Bearer CRON_SECRET` | Cria os lembretes do dia seguinte e processa a fila pendente, em lotes de até 50 mensagens. |
+
+Essa rota é destinada ao agendador do servidor e nunca deve ser chamada a partir do navegador do cliente. Repetir a execução não duplica os lembretes já criados.
 
 ### Administração
 
@@ -260,6 +313,7 @@ Essa rota exige autenticação e só pode alterar o perfil vinculado à sessão 
 - Exigir autenticação nas rotas de perfil, disponibilidade privada e agendamentos.
 - Manter autenticação e cookies administrativos separados das contas dos clientes.
 - Impedir reservas que coincidam com bloqueios administrativos de agenda.
+- Proteger o processador de notificações com um segredo exclusivo do ambiente.
 - Verificar se o agendamento pertence ao cliente antes de remarcar ou cancelar.
 - Usar transação e bloqueio adequado ao confirmar horários, considerando a duração do serviço.
 - Retornar `401` para sessão ausente/inválida, `403` para acesso indevido, `404` para recurso inexistente, `409` para conflito de horário e `422` para dados inválidos.
