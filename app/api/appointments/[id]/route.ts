@@ -7,6 +7,7 @@ import {
   validateAppointmentInput,
 } from '@/lib/appointments'
 import { getAuthenticatedCustomer } from '@/lib/auth'
+import { notifyAppointment } from '@/lib/email-notifications'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -27,6 +28,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (!id || id.length > 64) return errorResponse('Agendamento não encontrado.', 404)
 
     await rescheduleAppointment(customer.id, id, input)
+    await notifyAppointment(id, 'appointment_rescheduled')
     return NextResponse.json({ message: 'Agendamento remarcado com sucesso.' })
   } catch (error) {
     if (error instanceof AppointmentError) return errorResponse(error.message, error.status)
@@ -44,6 +46,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
     if (!id || id.length > 64) return errorResponse('Agendamento não encontrado.', 404)
 
     await cancelAppointment(customer.id, id)
+    await notifyAppointment(id, 'appointment_cancelled')
     return NextResponse.json({ message: 'Agendamento cancelado com sucesso.' })
   } catch (error) {
     if (error instanceof AppointmentError) return errorResponse(error.message, error.status)

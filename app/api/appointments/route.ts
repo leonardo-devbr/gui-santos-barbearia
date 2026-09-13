@@ -7,6 +7,7 @@ import {
   validateAppointmentInput,
 } from '@/lib/appointments'
 import { getAuthenticatedCustomer } from '@/lib/auth'
+import { notifyAppointment } from '@/lib/email-notifications'
 
 export async function GET(request: Request) {
   try {
@@ -32,6 +33,7 @@ export async function POST(request: Request) {
     if (!customer) return errorResponse('Faça login para agendar um horário.', 401)
 
     const id = await createAppointment(customer.id, input)
+    await notifyAppointment(id, 'appointment_created')
     return NextResponse.json({ id, message: 'Agendamento confirmado com sucesso.' }, { status: 201 })
   } catch (error) {
     if (error instanceof AppointmentError) return errorResponse(error.message, error.status)

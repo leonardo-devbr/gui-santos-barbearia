@@ -140,7 +140,7 @@ export async function updateAdminAppointmentStatus(
 ) {
   await requireAdminAccess()
 
-  await withTransaction(async (connection) => {
+  return withTransaction(async (connection) => {
     const [rows] = await connection.execute<AppointmentStatusRow[]>(
       'SELECT status FROM appointments WHERE id = ? LIMIT 1 FOR UPDATE',
       [appointmentId],
@@ -148,7 +148,7 @@ export async function updateAdminAppointmentStatus(
     const appointment = rows[0]
 
     if (!appointment) throw new AdminAppointmentError('Agendamento não encontrado.', 404)
-    if (appointment.status === nextStatus) return
+    if (appointment.status === nextStatus) return false
     if (appointment.status === 'concluido' || appointment.status === 'cancelado') {
       throw new AdminAppointmentError('Este atendimento já foi finalizado.', 409)
     }
@@ -157,5 +157,6 @@ export async function updateAdminAppointmentStatus(
       nextStatus,
       appointmentId,
     ])
+    return true
   })
 }

@@ -4,6 +4,23 @@ interface EmailTemplate {
   html: string
 }
 
+export type AppointmentEmailType =
+  | 'appointment_created'
+  | 'appointment_rescheduled'
+  | 'appointment_cancelled'
+  | 'appointment_reminder'
+
+export interface AppointmentEmailDetails {
+  customerName: string
+  serviceName: string
+  barberName: string
+  dateLabel: string
+  time: string
+  priceLabel: string
+  businessName: string
+  appointmentsUrl: string
+}
+
 function escapeHtml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -71,5 +88,45 @@ export function createPasswordResetEmail({
     actionUrl: resetUrl,
     businessName,
   })
+  return { subject, text, html }
+}
+
+export function createAppointmentEmail(
+  type: AppointmentEmailType,
+  details: AppointmentEmailDetails,
+): EmailTemplate {
+  const firstName = details.customerName.trim().split(/\s+/)[0] || 'cliente'
+  const titles: Record<AppointmentEmailType, string> = {
+    appointment_created: 'Agendamento confirmado',
+    appointment_rescheduled: 'Agendamento remarcado',
+    appointment_cancelled: 'Agendamento cancelado',
+    appointment_reminder: 'Seu horário está chegando',
+  }
+  const intros: Record<AppointmentEmailType, string> = {
+    appointment_created: `Olá, ${firstName}. Seu horário foi confirmado com sucesso.`,
+    appointment_rescheduled: `Olá, ${firstName}. Seu agendamento foi atualizado.`,
+    appointment_cancelled: `Olá, ${firstName}. O cancelamento do seu agendamento foi registrado.`,
+    appointment_reminder: `Olá, ${firstName}. Este é um lembrete do seu próximo atendimento.`,
+  }
+  const title = titles[type]
+  const subject = `${title} | ${details.businessName}`
+  const summary = `${details.serviceName} com ${details.barberName}, em ${details.dateLabel} às ${details.time}`
+  const text = `${intros[type]}\n\n${summary}.\nValor: ${details.priceLabel}.\n\nAcesse seus agendamentos: ${details.appointmentsUrl}`
+  const content = `<div style="margin:20px 0;padding:18px;border-radius:10px;background:#222;color:#e8e8e8;line-height:1.7">
+    <strong style="color:#fff">${escapeHtml(details.serviceName)}</strong><br>
+    Profissional: ${escapeHtml(details.barberName)}<br>
+    Data: ${escapeHtml(details.dateLabel)}<br>
+    Horário: ${escapeHtml(details.time)}<br>
+    Valor: ${escapeHtml(details.priceLabel)}
+  </div>`
+  const html = renderEmail({
+    title,
+    intro: intros[type],
+    content,
+    actionLabel: type === 'appointment_cancelled' ? 'Fazer novo agendamento' : 'Ver meus agendamentos',
+    actionUrl: details.appointmentsUrl,
+    businessName: details.businessName,
+  })
+
   return { subject, text, html }
 }

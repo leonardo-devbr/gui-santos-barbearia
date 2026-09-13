@@ -185,6 +185,40 @@ CREATE TABLE IF NOT EXISTS schedule_blocks (
   )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS email_notifications (
+  id CHAR(36) NOT NULL,
+  customer_id CHAR(36) NOT NULL,
+  appointment_id CHAR(36) NULL,
+  notification_type ENUM(
+    'appointment_created',
+    'appointment_rescheduled',
+    'appointment_cancelled',
+    'appointment_reminder'
+  ) NOT NULL,
+  recipient_email VARCHAR(254) NOT NULL,
+  recipient_name VARCHAR(80) NOT NULL,
+  subject VARCHAR(255) NOT NULL,
+  text_body TEXT NOT NULL,
+  html_body MEDIUMTEXT NOT NULL,
+  status ENUM('pending', 'processing', 'sent', 'failed') NOT NULL DEFAULT 'pending',
+  attempt_count TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  scheduled_for DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sent_at DATETIME NULL,
+  last_error VARCHAR(500) NULL,
+  dedupe_key VARCHAR(160) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY email_notifications_dedupe_unique (dedupe_key),
+  KEY email_notifications_pending_index (status, scheduled_for, attempt_count),
+  KEY email_notifications_customer_index (customer_id, created_at),
+  KEY email_notifications_appointment_index (appointment_id),
+  CONSTRAINT email_notifications_customer_id_fk
+    FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE,
+  CONSTRAINT email_notifications_appointment_id_fk
+    FOREIGN KEY (appointment_id) REFERENCES appointments (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 INSERT INTO services (id, name, description, duration_minutes, price, category)
 VALUES
   ('corte', 'Corte', 'Degradê, social ou corte tradicional.', 45, 40.00, 'cortes'),
