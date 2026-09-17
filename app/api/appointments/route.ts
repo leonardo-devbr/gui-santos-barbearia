@@ -8,6 +8,11 @@ import {
 } from '@/lib/appointments'
 import { getAuthenticatedCustomer } from '@/lib/auth'
 import { notifyAppointment } from '@/lib/email-notifications'
+import {
+  consumeRateLimits,
+  getClientIdentifier,
+  rateLimitResponse,
+} from '@/lib/rate-limit'
 
 export async function GET(request: Request) {
   try {
@@ -31,6 +36,22 @@ export async function POST(request: Request) {
   try {
     const customer = await getAuthenticatedCustomer()
     if (!customer) return errorResponse('Faça login para agendar um horário.', 401)
+
+    const rateLimit = await consumeRateLimits([
+      {
+        action: 'appointment-create-customer',
+        identifier: customer.id,
+        limit: 10,
+        windowSeconds: 60 * 60,
+      },
+      {
+        action: 'appointment-create-ip',
+        identifier: getClientIdentifier(request),
+        limit: 30,
+        windowSeconds: 60 * 60,
+      },
+    ])
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
 
     const id = await createAppointment(customer.id, input)
     await notifyAppointment(id, 'appointment_created')

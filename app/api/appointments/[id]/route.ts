@@ -8,6 +8,11 @@ import {
 } from '@/lib/appointments'
 import { getAuthenticatedCustomer } from '@/lib/auth'
 import { notifyAppointment } from '@/lib/email-notifications'
+import {
+  consumeRateLimits,
+  getClientIdentifier,
+  rateLimitResponse,
+} from '@/lib/rate-limit'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -24,12 +29,30 @@ export async function PATCH(request: Request, context: RouteContext) {
     const customer = await getAuthenticatedCustomer()
     if (!customer) return errorResponse('Faça login para remarcar um horário.', 401)
 
+    const rateLimit = await consumeRateLimits([
+      {
+        action: 'appointment-reschedule-customer',
+        identifier: customer.id,
+        limit: 10,
+        windowSeconds: 60 * 60,
+      },
+      {
+        action: 'appointment-reschedule-ip',
+        identifier: getClientIdentifier(request),
+        limit: 30,
+        windowSeconds: 60 * 60,
+      },
+    ])
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
+
     const { id } = await context.params
     if (!id || id.length > 64) return errorResponse('Agendamento não encontrado.', 404)
 
-    await rescheduleAppointment(customer.id, id, input)
-    await notifyAppointment(id, 'appointment_rescheduled')
-    return NextResponse.json({ message: 'Agendamento remarcado com sucesso.' })
+    const changed = await rescheduleAppointment(customer.id, id, input)
+    if (changed) await notifyAppointment(id, 'appointment_rescheduled')
+    return NextResponse.json({
+      message: changed ? 'Agendamento remarcado com sucesso.' : 'O agendamento já está atualizado.',
+    })
   } catch (error) {
     if (error instanceof AppointmentError) return errorResponse(error.message, error.status)
     if (isDuplicateEntry(error)) return errorResponse('Este horário já foi reservado.', 409)
@@ -37,10 +60,26 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
   try {
     const customer = await getAuthenticatedCustomer()
     if (!customer) return errorResponse('Faça login para cancelar um horário.', 401)
+
+    const rateLimit = await consumeRateLimits([
+      {
+        action: 'appointment-cancel-customer',
+        identifier: customer.id,
+        limit: 20,
+        windowSeconds: 60 * 60,
+      },
+      {
+        action: 'appointment-cancel-ip',
+        identifier: getClientIdentifier(request),
+        limit: 60,
+        windowSeconds: 60 * 60,
+      },
+    ])
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
 
     const { id } = await context.params
     if (!id || id.length > 64) return errorResponse('Agendamento não encontrado.', 404)

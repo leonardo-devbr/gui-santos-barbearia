@@ -2,7 +2,7 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
-import { getNowInSaoPaulo, isValidIsoDate, isValidTime } from '@/lib/date'
+import { addDaysToIsoDate, getNowInSaoPaulo, isValidIsoDate, isValidTime } from '@/lib/date'
 import { getPool, withTransaction } from '@/lib/db'
 import type { Appointment, AppointmentStatus, TimeSlot } from '@/lib/types'
 
@@ -29,6 +29,10 @@ interface IdRow extends RowDataPacket {
   id: string
 }
 
+interface CountRow extends RowDataPacket {
+  total: number
+}
+
 interface BusySlotRow extends RowDataPacket {
   appointment_time: string
   duration_minutes: number
@@ -47,11 +51,15 @@ interface BusinessHoursRow extends RowDataPacket {
 
 interface OwnedAppointmentRow extends RowDataPacket {
   id: string
+  service_id: string
   barber_id: string
   status: AppointmentStatus
   appointment_date: string
   appointment_time: string
 }
+
+const MAX_BOOKING_DAYS_AHEAD = 90
+const MAX_ACTIVE_APPOINTMENTS = 5
 
 export interface AppointmentInput {
   serviceId: string
@@ -121,6 +129,13 @@ function validateBookingTime(
   const now = getNowInSaoPaulo()
   if (date < now.date || (date === now.date && time <= now.time)) {
     throw new AppointmentError('Escolha um horário futuro.', 422)
+  }
+
+  if (date > addDaysToIsoDate(now.date, MAX_BOOKING_DAYS_AHEAD)) {
+    throw new AppointmentError(
+      `Os agendamentos podem ser feitos com até ${MAX_BOOKING_DAYS_AHEAD} dias de antecedência.`,
+      422,
+    )
   }
 }
 
@@ -199,6 +214,15 @@ export async function getAvailability({
 }: Omit<AppointmentInput, 'time'> & { customerId: string; appointmentId?: string }) {
   if (!isValidIsoDate(date)) throw new AppointmentError('Informe uma data válida.', 422)
 
+  const now = getNowInSaoPaulo()
+  if (date < now.date) throw new AppointmentError('Escolha uma data atual ou futura.', 422)
+  if (date > addDaysToIsoDate(now.date, MAX_BOOKING_DAYS_AHEAD)) {
+    throw new AppointmentError(
+      `Os horários ficam disponíveis com até ${MAX_BOOKING_DAYS_AHEAD} dias de antecedência.`,
+      422,
+    )
+  }
+
   const pool = getPool()
   const weekday = new Date(`${date}T12:00:00.000Z`).getUTCDay()
   const [[serviceRows], [barberRows], [businessHoursRows]] = await Promise.all([
@@ -256,7 +280,6 @@ export async function getAvailability({
       [date, barberId],
     ),
   ])
-  const now = getNowInSaoPaulo()
   const slots: TimeSlot[] = []
 
   for (
@@ -386,6 +409,28 @@ async function ensureNoScheduleBlock(
 
 export async function createAppointment(customerId: string, input: AppointmentInput) {
   return withTransaction(async (connection) => {
+    const [customerRows] = await connection.execute<IdRow[]>(
+      'SELECT id FROM customers WHERE id = ? LIMIT 1 FOR UPDATE',
+      [customerId],
+    )
+    if (!customerRows[0]) throw new AppointmentError('Cliente não encontrado.', 404)
+
+    const now = getNowInSaoPaulo()
+    const [countRows] = await connection.execute<CountRow[]>(
+      `SELECT COUNT(*) AS total
+       FROM appointments
+       WHERE customer_id = ?
+         AND status IN ('confirmado', 'pendente')
+         AND (appointment_date > ? OR (appointment_date = ? AND appointment_time >= ?))`,
+      [customerId, now.date, now.date, `${now.time}:00`],
+    )
+    if ((countRows[0]?.total ?? 0) >= MAX_ACTIVE_APPOINTMENTS) {
+      throw new AppointmentError(
+        `Você pode manter no máximo ${MAX_ACTIVE_APPOINTMENTS} agendamentos futuros ativos.`,
+        409,
+      )
+    }
+
     const service = await getBookingResources(connection, input)
     await ensureNoScheduleBlock(connection, input, service.duration_minutes)
     await ensureNoConflict(connection, input, service.duration_minutes)
@@ -418,7 +463,7 @@ export async function rescheduleAppointment(
 ) {
   return withTransaction(async (connection) => {
     const [appointmentRows] = await connection.execute<OwnedAppointmentRow[]>(
-      `SELECT id, barber_id, status, appointment_date, appointment_time
+      `SELECT id, service_id, barber_id, status, appointment_date, appointment_time
        FROM appointments
        WHERE id = ? AND customer_id = ?
        LIMIT 1
@@ -435,6 +480,13 @@ export async function rescheduleAppointment(
     if (appointment.status === 'cancelado' || appointment.status === 'concluido' || isPast) {
       throw new AppointmentError('Este agendamento não pode mais ser remarcado.', 409)
     }
+
+    const isUnchanged =
+      appointment.service_id === input.serviceId &&
+      appointment.barber_id === input.barberId &&
+      appointment.appointment_date === input.date &&
+      appointment.appointment_time.slice(0, 5) === input.time
+    if (isUnchanged) return false
 
     const service = await getBookingResources(connection, input)
     await ensureNoScheduleBlock(connection, input, service.duration_minutes)
@@ -455,6 +507,8 @@ export async function rescheduleAppointment(
         appointmentId,
       ],
     )
+
+    return true
   })
 }
 
@@ -473,7 +527,7 @@ export async function cancelAppointment(customerId: string, appointmentId: strin
   if (result.affectedRows > 0) return
 
   const [rows] = await getPool().execute<OwnedAppointmentRow[]>(
-    `SELECT id, barber_id, status, appointment_date, appointment_time
+    `SELECT id, service_id, barber_id, status, appointment_date, appointment_time
      FROM appointments
      WHERE id = ? AND customer_id = ?
      LIMIT 1`,
