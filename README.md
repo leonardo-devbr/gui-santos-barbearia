@@ -60,6 +60,7 @@ MYSQL_PORT=3306
 MYSQL_USER=root
 MYSQL_PASSWORD="SENHA_CRIADA_NA_INSTALACAO"
 MYSQL_DATABASE=gui_santos_barbearia
+MYSQL_SSL=false
 ```
 
 Não remova as aspas da senha e nunca envie `.env.local` ao GitHub.
@@ -79,6 +80,8 @@ Banco gui_santos_barbearia preparado com sucesso.
 ```
 
 Esse comando pode ser executado novamente com segurança. Ele mantém clientes e agendamentos existentes e atualiza o catálogo inicial de serviços e barbeiros.
+
+Em um servidor, o comando também pode usar uma credencial temporária com permissão para criar ou alterar tabelas. Defina `MYSQL_SETUP_USER` e `MYSQL_SETUP_PASSWORD`, execute `db:setup` e depois remova essas duas variáveis do ambiente da aplicação. O site continuará usando `MYSQL_USER` e `MYSQL_PASSWORD` normalmente.
 
 ### 6. Criar o primeiro administrador
 
@@ -116,7 +119,7 @@ SMTP_PASSWORD="sua-senha-ou-chave-de-aplicativo"
 SMTP_FROM="Gui Santos Barbearia <nao-responda@seudominio.com>"
 ```
 
-Use `SMTP_SECURE=true` com a porta `465`; na porta `587`, mantenha `false` para usar STARTTLS. Quando o provedor oferecer senha de aplicativo, use-a no lugar da senha normal da conta.
+Use `SMTP_SECURE=true` com a porta `465`; na porta `587`, mantenha `false` para exigir STARTTLS. Conexões SMTP usam no mínimo TLS 1.2 e validam o certificado do servidor. Quando o provedor oferecer senha de aplicativo, use-a no lugar da senha normal da conta.
 
 Os lembretes e as novas tentativas de envio exigem um segredo. Gere um valor aleatório:
 
@@ -150,6 +153,20 @@ O comando cria um lembrete para cada atendimento do dia seguinte, evita duplica�
 
 Em produção, configure o agendador da hospedagem para fazer uma requisição `POST` diária a `/api/notifications/process`, enviando o cabeçalho `Authorization: Bearer VALOR_DO_CRON_SECRET`. O segredo deve existir tanto no ambiente do site quanto no agendador.
 
+### Preparação para produção
+
+Antes de publicar o site:
+
+- use HTTPS e configure `APP_URL` somente com a origem pública, por exemplo `https://barbearia.exemplo.com`, sem caminho adicional;
+- use um usuário MySQL exclusivo da aplicação, com acesso somente ao banco do projeto e sem permissões administrativas globais;
+- defina `MYSQL_SSL=true` quando o MySQL estiver em outro servidor; se o provedor fornecer uma autoridade certificadora própria, informe o certificado PEM em base64 por `MYSQL_SSL_CA_BASE64`;
+- guarde senhas e segredos nas variáveis protegidas da hospedagem, nunca em um arquivo enviado ao GitHub;
+- configure SMTP com TLS, um remetente do domínio e credenciais exclusivas da aplicação;
+- gere um `CRON_SECRET` longo e diferente das demais senhas;
+- mantenha `DEV_EXPOSE_PASSWORD_RESET_URL=false` e remova `ADMIN_PASSWORD`, `MYSQL_SETUP_USER` e `MYSQL_SETUP_PASSWORD` depois das tarefas de configuração.
+
+Para o banco remoto, `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD` e `MYSQL_DATABASE` devem ser definidos explicitamente. A aplicação recusa uma conexão remota sem TLS em produção; bancos locais em `localhost` ou `127.0.0.1` continuam funcionando com `MYSQL_SSL=false`.
+
 ### Atualizando uma cópia já existente
 
 Depois que outro desenvolvedor enviar alterações ao repositório:
@@ -182,11 +199,13 @@ npm run build
 
 O backend usa Route Handlers do Next.js e MySQL. Cadastro, login, logout, perfil, catálogo, disponibilidade, criação, remarcação, cancelamento e histórico de agendamentos estão conectados ao banco. O painel administrativo também usa o MySQL para autenticação da equipe, indicadores, agenda diária, bloqueios, catálogo, equipe e configurações do estabelecimento.
 
-As senhas usam derivação `scrypt`. Sessões e tokens de recuperação ficam no MySQL, enquanto o navegador recebe apenas um cookie de sessão `HttpOnly`. A confirmação de um horário ocorre dentro de uma transação que bloqueia o barbeiro selecionado e verifica novamente qualquer sobreposição.
+As senhas usam derivação `scrypt` e novas senhas exigem ao menos 12 caracteres, uma letra e um número. Sessões e tokens de recuperação ficam no MySQL, enquanto o navegador recebe apenas um cookie de sessão `HttpOnly`, `SameSite=Lax` e seguro em produção. Sessões antigas são limitadas e rotacionadas durante novos logins. A confirmação de um horário ocorre dentro de uma transação que bloqueia os recursos necessários e verifica novamente qualquer sobreposição.
 
-Recuperação de senha, confirmação, remarcação, cancelamento e lembrete de agendamento possuem e-mails próprios. Sem SMTP, o desenvolvimento mostra uma prévia no terminal e a recuperação de senha também apresenta o link local na tela. Em produção, `APP_URL` e as credenciais SMTP são obrigatórios para a entrega real.
+Recuperação de senha, confirmação, remarcação, cancelamento e lembrete de agendamento possuem e-mails próprios. Sem SMTP, o desenvolvimento mostra uma prévia no terminal. O link de recuperação só aparece diretamente na tela quando `DEV_EXPOSE_PASSWORD_RESET_URL=true`, a origem é local e o ambiente não é de produção. Em produção, `APP_URL` com HTTPS e as credenciais SMTP são obrigatórios para a entrega real.
 
 As notificações de agendamento são registradas em uma fila no MySQL. Uma indisponibilidade do provedor de e-mail não desfaz o agendamento: a mensagem fica marcada como falha e o processador pode tentar novamente até três vezes.
+
+A API rejeita origens incompatíveis em operações que alteram dados, limita o corpo JSON, aplica limites de tentativas em autenticação e agenda e envia cabeçalhos de segurança no navegador. Trocar o e-mail do cliente ou gerenciar contas administrativas exige confirmar a senha atual.
 
 Todas as requisições e respostas usam JSON. Em erros, a API responde com um status HTTP adequado e, sempre que possível, com este formato:
 
@@ -210,7 +229,7 @@ Todas as requisições e respostas usam JSON. Em erros, a API responde com um st
 | `POST` | `/api/auth/register` | `{ "name", "phone", "email", "password" }` | Cria a conta; e-mail deve ser único. |
 | `POST` | `/api/auth/login` | `{ "email", "password" }` | Cria a sessão e envia um cookie seguro e `HttpOnly`. |
 | `POST` | `/api/auth/logout` | Sem corpo | Invalida a sessão e remove o cookie. |
-| `POST` | `/api/auth/forgot-password` | `{ "email" }` | Cria um token sem revelar se o e-mail existe; em desenvolvimento, devolve o link local. |
+| `POST` | `/api/auth/forgot-password` | `{ "email" }` | Cria um token sem revelar se o e-mail existe; só devolve o link local com a opção explícita de desenvolvimento. |
 | `POST` | `/api/auth/reset-password` | `{ "token", "password" }` | Consome um token válido e altera a senha. |
 
 O link de recuperação aponta para `/redefinir-senha?token=TOKEN`. O token é aleatório, armazenado somente como hash, expira em uma hora e é invalidado após o uso.
@@ -236,7 +255,7 @@ Resposta de sucesso:
 | `PATCH` | `/api/appointments/:id` | `{ "serviceId", "barberId", "date", "time" }` | Remarca um agendamento pertencente ao cliente autenticado. |
 | `DELETE` | `/api/appointments/:id` | Sem corpo | Cancela um agendamento pertencente ao cliente autenticado. |
 
-A disponibilidade exibida no navegador é apenas informativa. Ao criar ou remarcar, o backend valida novamente o horário dentro de uma transação para impedir dois agendamentos simultâneos para o mesmo barbeiro.
+A disponibilidade exibida no navegador é apenas informativa. Ao criar ou remarcar, o backend valida novamente o horário dentro de uma transação para impedir dois agendamentos simultâneos para o mesmo barbeiro. Cada cliente pode manter até cinco agendamentos futuros ativos, e os horários são liberados com no máximo 90 dias de antecedência. Reenviar uma remarcação sem mudanças não gera uma notificação duplicada.
 
 ### Notificações
 
@@ -264,8 +283,8 @@ Clientes e administradores possuem contas, sessões, cookies e telas de login in
 | `PATCH` | `/api/admin/barbers/:id` | Dados do barbeiro | Edita ou ativa/desativa um barbeiro. |
 | `PATCH` | `/api/admin/business` | Dados do estabelecimento | Atualiza contato, endereço e localização. |
 | `PUT` | `/api/admin/business-hours` | `{ "hours": [...] }` | Atualiza os sete dias de funcionamento. |
-| `POST` | `/api/admin/users` | `{ "name", "email", "password" }` | Cria outro administrador. |
-| `PATCH` | `/api/admin/users/:id` | Dados da conta | Edita, redefine a senha ou desativa um administrador. |
+| `POST` | `/api/admin/users` | `{ "name", "email", "password", "currentPassword" }` | Cria outro administrador após confirmar a senha do administrador atual. |
+| `PATCH` | `/api/admin/users/:id` | Dados da conta e `currentPassword` | Edita, redefine a senha ou desativa um administrador após confirmar a senha atual. |
 
 No navegador, o painel possui as seguintes áreas:
 
@@ -296,6 +315,7 @@ Serviços e barbeiros são desativados, não apagados, preservando o histórico 
 ```
 
 Essa rota exige autenticação e só pode alterar o perfil vinculado à sessão atual.
+Ao trocar o e-mail, envie também `currentPassword`; as demais sessões do cliente são revogadas depois da alteração.
 
 ### Leituras
 
