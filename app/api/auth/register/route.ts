@@ -1,9 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
-import type { ResultSetHeader } from 'mysql2/promise'
+import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { errorResponse, internalErrorResponse, readJsonObject } from '@/lib/api'
 import { hashPassword } from '@/lib/auth'
 import { getPool } from '@/lib/db'
+import {
+  consumeRateLimits,
+  getClientIdentifier,
+  rateLimitResponse,
+} from '@/lib/rate-limit'
 import {
   getPasswordError,
   isValidEmail,
@@ -12,6 +17,10 @@ import {
 } from '@/lib/validation'
 
 type RegistrationField = 'name' | 'phone' | 'email' | 'password'
+
+interface ExistingCustomerRow extends RowDataPacket {
+  id: string
+}
 
 function validateRegistration(body: Record<string, unknown>) {
   const name = typeof body.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : ''
@@ -47,8 +56,35 @@ export async function POST(request: Request) {
   }
 
   try {
+    const rateLimit = await consumeRateLimits([
+      {
+        action: 'customer-register-email',
+        identifier: data.email,
+        limit: 3,
+        windowSeconds: 60 * 60,
+      },
+      {
+        action: 'customer-register-ip',
+        identifier: getClientIdentifier(request),
+        limit: 10,
+        windowSeconds: 60 * 60,
+      },
+    ])
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
+
+    const pool = getPool()
+    const [existingCustomers] = await pool.execute<ExistingCustomerRow[]>(
+      'SELECT id FROM customers WHERE email = ? LIMIT 1',
+      [data.email],
+    )
+    if (existingCustomers[0]) {
+      return errorResponse('Já existe uma conta com este e-mail.', 409, {
+        email: 'Este e-mail já está cadastrado.',
+      })
+    }
+
     const passwordHash = await hashPassword(data.password)
-    await getPool().execute<ResultSetHeader>(
+    await pool.execute<ResultSetHeader>(
       'INSERT INTO customers (id, name, phone, email, password_hash) VALUES (?, ?, ?, ?, ?)',
       [randomUUID(), data.name, data.phone, data.email, passwordHash],
     )

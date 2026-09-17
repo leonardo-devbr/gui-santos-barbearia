@@ -131,6 +131,17 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
     FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS security_rate_limits (
+  bucket_key CHAR(64) NOT NULL,
+  action VARCHAR(40) NOT NULL,
+  hit_count SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+  window_started_at DATETIME NOT NULL,
+  expires_at DATETIME NOT NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (bucket_key),
+  KEY security_rate_limits_expiry_index (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS appointments (
   id CHAR(36) NOT NULL,
   customer_id CHAR(36) NOT NULL,

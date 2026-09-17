@@ -2,7 +2,13 @@ import { NextResponse } from 'next/server'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { hashPassword, hashToken } from '@/lib/auth'
 import { errorResponse, internalErrorResponse, readJsonObject } from '@/lib/api'
-import { withTransaction } from '@/lib/db'
+import { getPool, withTransaction } from '@/lib/db'
+import {
+  consumeRateLimits,
+  getClientIdentifier,
+  rateLimitResponse,
+  resetRateLimit,
+} from '@/lib/rate-limit'
 import { getPasswordError } from '@/lib/validation'
 
 interface ResetTokenRow extends RowDataPacket {
@@ -25,6 +31,34 @@ export async function POST(request: Request) {
   }
 
   try {
+    const tokenHash = hashToken(token)
+    const rateLimit = await consumeRateLimits([
+      {
+        action: 'password-reset-token',
+        identifier: tokenHash,
+        limit: 5,
+        windowSeconds: 15 * 60,
+      },
+      {
+        action: 'password-reset-ip',
+        identifier: getClientIdentifier(request),
+        limit: 20,
+        windowSeconds: 15 * 60,
+      },
+    ])
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
+
+    const [validTokenRows] = await getPool().execute<ResetTokenRow[]>(
+      `SELECT customer_id
+       FROM password_reset_tokens
+       WHERE token_hash = ? AND used_at IS NULL AND expires_at > UTC_TIMESTAMP()
+       LIMIT 1`,
+      [tokenHash],
+    )
+    if (!validTokenRows[0]) {
+      return errorResponse('O link de recuperação é inválido ou expirou.', 422)
+    }
+
     const passwordHash = await hashPassword(password)
     const changed = await withTransaction(async (connection) => {
       const [rows] = await connection.execute<ResetTokenRow[]>(
@@ -32,7 +66,7 @@ export async function POST(request: Request) {
          FROM password_reset_tokens
          WHERE token_hash = ? AND used_at IS NULL AND expires_at > UTC_TIMESTAMP()
          FOR UPDATE`,
-        [hashToken(token)],
+        [tokenHash],
       )
       const resetToken = rows[0]
       if (!resetToken) return false
@@ -41,10 +75,9 @@ export async function POST(request: Request) {
         'UPDATE customers SET password_hash = ? WHERE id = ?',
         [passwordHash, resetToken.customer_id],
       )
-      await connection.execute<ResultSetHeader>(
-        'UPDATE password_reset_tokens SET used_at = UTC_TIMESTAMP() WHERE token_hash = ?',
-        [hashToken(token)],
-      )
+      await connection.execute<ResultSetHeader>('DELETE FROM password_reset_tokens WHERE customer_id = ?', [
+        resetToken.customer_id,
+      ])
       await connection.execute<ResultSetHeader>('DELETE FROM sessions WHERE customer_id = ?', [
         resetToken.customer_id,
       ])
@@ -52,6 +85,7 @@ export async function POST(request: Request) {
     })
 
     if (!changed) return errorResponse('O link de recuperação é inválido ou expirou.', 422)
+    await resetRateLimit('password-reset-token', tokenHash)
     return NextResponse.json({ message: 'Senha redefinida com sucesso.' })
   } catch (error) {
     return internalErrorResponse(error)

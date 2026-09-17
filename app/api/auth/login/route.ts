@@ -3,6 +3,12 @@ import type { RowDataPacket } from 'mysql2/promise'
 import { errorResponse, internalErrorResponse, readJsonObject } from '@/lib/api'
 import { createSession, verifyPassword } from '@/lib/auth'
 import { getPool } from '@/lib/db'
+import {
+  consumeRateLimits,
+  getClientIdentifier,
+  rateLimitResponse,
+  resetRateLimit,
+} from '@/lib/rate-limit'
 import { isValidEmail, MAX_PASSWORD_LENGTH, normalizeEmail } from '@/lib/validation'
 
 interface LoginRow extends RowDataPacket {
@@ -30,6 +36,22 @@ export async function POST(request: Request) {
   }
 
   try {
+    const rateLimit = await consumeRateLimits([
+      {
+        action: 'customer-login-email',
+        identifier: email,
+        limit: 8,
+        windowSeconds: 15 * 60,
+      },
+      {
+        action: 'customer-login-ip',
+        identifier: getClientIdentifier(request),
+        limit: 30,
+        windowSeconds: 15 * 60,
+      },
+    ])
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
+
     const [rows] = await getPool().execute<LoginRow[]>(
       'SELECT id, password_hash FROM customers WHERE email = ? LIMIT 1',
       [email],
@@ -42,6 +64,7 @@ export async function POST(request: Request) {
     }
 
     await createSession(customer.id)
+    await resetRateLimit('customer-login-email', email)
     return NextResponse.json({ message: 'Login realizado com sucesso.' })
   } catch (error) {
     return internalErrorResponse(error)

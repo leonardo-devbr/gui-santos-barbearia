@@ -4,6 +4,12 @@ import { createStaffSession } from '@/lib/admin-auth'
 import { errorResponse, internalErrorResponse, readJsonObject } from '@/lib/api'
 import { verifyPassword } from '@/lib/auth'
 import { getPool } from '@/lib/db'
+import {
+  consumeRateLimits,
+  getClientIdentifier,
+  rateLimitResponse,
+  resetRateLimit,
+} from '@/lib/rate-limit'
 import { isValidEmail, MAX_PASSWORD_LENGTH, normalizeEmail } from '@/lib/validation'
 
 interface StaffLoginRow extends RowDataPacket {
@@ -27,6 +33,22 @@ export async function POST(request: Request) {
   }
 
   try {
+    const rateLimit = await consumeRateLimits([
+      {
+        action: 'admin-login-email',
+        identifier: email,
+        limit: 5,
+        windowSeconds: 15 * 60,
+      },
+      {
+        action: 'admin-login-ip',
+        identifier: getClientIdentifier(request),
+        limit: 15,
+        windowSeconds: 15 * 60,
+      },
+    ])
+    if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
+
     const [rows] = await getPool().execute<StaffLoginRow[]>(
       `SELECT id, password_hash, role
        FROM staff_users
@@ -42,6 +64,7 @@ export async function POST(request: Request) {
     }
 
     await createStaffSession(staff.id)
+    await resetRateLimit('admin-login-email', email)
     return NextResponse.json({ message: 'Acesso administrativo autorizado.' })
   } catch (error) {
     return internalErrorResponse(error)
