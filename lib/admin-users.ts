@@ -3,7 +3,7 @@ import 'server-only'
 import { randomUUID } from 'node:crypto'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { getAuthenticatedAdmin } from '@/lib/admin-auth'
-import { hashPassword } from '@/lib/auth'
+import { hashPassword, verifyPassword } from '@/lib/auth'
 import { getPool, withTransaction } from '@/lib/db'
 import type { AdminUser } from '@/lib/types'
 import { isValidEmail, MAX_PASSWORD_LENGTH, normalizeEmail } from '@/lib/validation'
@@ -17,6 +17,10 @@ interface AdminUserRow extends RowDataPacket {
 
 interface IdRow extends RowDataPacket {
   id: string
+}
+
+interface PasswordRow extends RowDataPacket {
+  password_hash: string
 }
 
 export class AdminUserError extends Error {
@@ -74,6 +78,21 @@ function validatePassword(value: unknown, required: boolean) {
   return password
 }
 
+async function requireCurrentAdminPassword(adminId: string, value: unknown) {
+  const password = typeof value === 'string' ? value : ''
+  if (!password || password.length > MAX_PASSWORD_LENGTH) {
+    throw new AdminUserError('Informe sua senha atual para confirmar esta operação.', 422)
+  }
+
+  const [rows] = await getPool().execute<PasswordRow[]>(
+    'SELECT password_hash FROM staff_users WHERE id = ? AND is_active = TRUE LIMIT 1',
+    [adminId],
+  )
+  if (!rows[0] || !(await verifyPassword(password, rows[0].password_hash))) {
+    throw new AdminUserError('A senha atual não confere.', 403)
+  }
+}
+
 export async function getAdminUsers() {
   const admin = await requireAdminAccess()
   const [rows] = await getPool().execute<AdminUserRow[]>(
@@ -87,6 +106,7 @@ export async function getAdminUsers() {
 
 export async function createAdminUser(body: Record<string, unknown>) {
   const admin = await requireAdminAccess()
+  await requireCurrentAdminPassword(admin.id, body.currentPassword)
   const identity = validateIdentity(body)
   const password = validatePassword(body.password, true)!
   const passwordHash = await hashPassword(password)
@@ -116,6 +136,7 @@ export async function createAdminUser(body: Record<string, unknown>) {
 
 export async function updateAdminUser(id: string, body: Record<string, unknown>) {
   const admin = await requireAdminAccess()
+  await requireCurrentAdminPassword(admin.id, body.currentPassword)
   if (!id || id.length > 64) throw new AdminUserError('Administrador não encontrado.', 404)
   const identity = validateIdentity(body)
   const password = validatePassword(body.password, false)

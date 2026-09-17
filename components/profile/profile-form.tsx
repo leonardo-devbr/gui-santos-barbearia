@@ -6,13 +6,22 @@ import { LoaderCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import type { CustomerProfile } from '@/lib/types'
 import { formatPhone, isValidEmail, normalizeEmail, normalizePhone } from '@/lib/validation'
 
-type ProfileField = 'name' | 'phone' | 'email' | 'birthDate' | 'preferredCut' | 'beardStyle' | 'notes'
+type ProfileField =
+  | 'name'
+  | 'phone'
+  | 'email'
+  | 'birthDate'
+  | 'preferredCut'
+  | 'beardStyle'
+  | 'notes'
+  | 'currentPassword'
 
 type ProfileErrors = Partial<Record<ProfileField, string>>
 
@@ -31,6 +40,7 @@ export function ProfileForm({ customer }: { customer: CustomerProfile }) {
     preferredCut: customer.preferredCut,
     beardStyle: customer.beardStyle,
     notes: customer.notes,
+    currentPassword: '',
   })
   const [errors, setErrors] = useState<ProfileErrors>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -58,6 +68,9 @@ export function ProfileForm({ customer }: { customer: CustomerProfile }) {
       validationErrors.phone = 'Informe um telefone com DDD.'
     }
     if (!isValidEmail(form.email)) validationErrors.email = 'Informe um e-mail válido.'
+    if (normalizeEmail(form.email) !== customer.email && !form.currentPassword) {
+      validationErrors.currentPassword = 'Informe sua senha atual para alterar o e-mail.'
+    }
     if (form.birthDate && form.birthDate > today) {
       validationErrors.birthDate = 'A data de nascimento não pode estar no futuro.'
     }
@@ -112,6 +125,7 @@ export function ProfileForm({ customer }: { customer: CustomerProfile }) {
       toast.success('Perfil atualizado', {
         description: 'Suas informações foram salvas com sucesso.',
       })
+      setForm((current) => ({ ...current, currentPassword: '' }))
       router.refresh()
     } catch {
       setSubmitError('Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.')
@@ -193,6 +207,32 @@ export function ProfileForm({ customer }: { customer: CustomerProfile }) {
               />
               <FieldError id="profile-email-error">{errors.email}</FieldError>
             </Field>
+            {normalizeEmail(form.email) !== customer.email && (
+              <Field data-invalid={Boolean(errors.currentPassword)}>
+                <FieldLabel htmlFor="currentPassword">Senha atual</FieldLabel>
+                <PasswordInput
+                  id="currentPassword"
+                  name="currentPassword"
+                  autoComplete="current-password"
+                  value={form.currentPassword}
+                  maxLength={128}
+                  aria-invalid={Boolean(errors.currentPassword)}
+                  aria-describedby={
+                    errors.currentPassword
+                      ? 'profile-current-password-error'
+                      : 'profile-current-password-description'
+                  }
+                  onValueChange={(value) => update('currentPassword', value)}
+                  required
+                />
+                {!errors.currentPassword && (
+                  <p id="profile-current-password-description" className="text-xs text-muted-foreground">
+                    Confirme sua identidade para proteger a alteração do e-mail.
+                  </p>
+                )}
+                <FieldError id="profile-current-password-error">{errors.currentPassword}</FieldError>
+              </Field>
+            )}
           </FieldGroup>
         </CardContent>
       </Card>

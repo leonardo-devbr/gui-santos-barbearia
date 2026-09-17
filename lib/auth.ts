@@ -8,7 +8,9 @@ import { getPool } from '@/lib/db'
 import type { CustomerProfile } from '@/lib/types'
 
 const scrypt = promisify(scryptCallback)
-const SESSION_COOKIE_NAME = 'gui_santos_session'
+const LEGACY_SESSION_COOKIE_NAME = 'gui_santos_session'
+const SESSION_COOKIE_NAME =
+  process.env.NODE_ENV === 'production' ? '__Host-gui_santos_session' : LEGACY_SESSION_COOKIE_NAME
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 const PASSWORD_KEY_LENGTH = 64
 
@@ -23,6 +25,10 @@ interface CustomerRow extends RowDataPacket {
   beard_style: string
   notes: string
   loyalty_points: number
+}
+
+interface PasswordRow extends RowDataPacket {
+  password_hash: string
 }
 
 function mapCustomer(row: CustomerRow): CustomerProfile {
@@ -74,20 +80,44 @@ export async function createSession(customerId: string) {
   const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000)
   const pool = getPool()
 
+  const cookieStore = await cookies()
+  const previousToken = cookieStore.get(SESSION_COOKIE_NAME)?.value
+
   await pool.execute('DELETE FROM sessions WHERE expires_at <= UTC_TIMESTAMP()')
+  if (previousToken) {
+    await pool.execute('DELETE FROM sessions WHERE token_hash = ?', [hashToken(previousToken)])
+  }
   await pool.execute(
     'INSERT INTO sessions (token_hash, customer_id, expires_at) VALUES (?, ?, ?)',
     [tokenHash, customerId, expiresAt],
   )
+  await pool.execute(
+    `DELETE FROM sessions
+     WHERE customer_id = ?
+       AND token_hash <> ?
+       AND token_hash NOT IN (
+         SELECT token_hash FROM (
+           SELECT token_hash
+           FROM sessions
+           WHERE customer_id = ? AND token_hash <> ?
+           ORDER BY created_at DESC, token_hash DESC
+           LIMIT 4
+         ) AS recent_sessions
+       )`,
+    [customerId, tokenHash, customerId, tokenHash],
+  )
 
-  const cookieStore = await cookies()
   cookieStore.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: 'lax',
     secure: process.env.NODE_ENV === 'production',
     path: '/',
     maxAge: SESSION_MAX_AGE_SECONDS,
+    priority: 'high',
   })
+  if (SESSION_COOKIE_NAME !== LEGACY_SESSION_COOKIE_NAME) {
+    cookieStore.delete(LEGACY_SESSION_COOKIE_NAME)
+  }
 }
 
 export async function destroySession() {
@@ -99,6 +129,27 @@ export async function destroySession() {
   }
 
   cookieStore.delete(SESSION_COOKIE_NAME)
+  if (SESSION_COOKIE_NAME !== LEGACY_SESSION_COOKIE_NAME) {
+    cookieStore.delete(LEGACY_SESSION_COOKIE_NAME)
+  }
+}
+
+export async function verifyCustomerPassword(customerId: string, password: string) {
+  const [rows] = await getPool().execute<PasswordRow[]>(
+    'SELECT password_hash FROM customers WHERE id = ? LIMIT 1',
+    [customerId],
+  )
+  return rows[0] ? verifyPassword(password, rows[0].password_hash) : false
+}
+
+export async function revokeOtherCustomerSessions(customerId: string) {
+  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value
+  if (!token) return
+
+  await getPool().execute<ResultSetHeader>(
+    'DELETE FROM sessions WHERE customer_id = ? AND token_hash <> ?',
+    [customerId, hashToken(token)],
+  )
 }
 
 export async function getAuthenticatedCustomer() {

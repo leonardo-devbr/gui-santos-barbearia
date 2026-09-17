@@ -1,10 +1,19 @@
 import { NextResponse } from 'next/server'
 import type { ResultSetHeader } from 'mysql2/promise'
 import { errorResponse, internalErrorResponse, readJsonObject } from '@/lib/api'
-import { getAuthenticatedCustomer } from '@/lib/auth'
+import {
+  getAuthenticatedCustomer,
+  revokeOtherCustomerSessions,
+  verifyCustomerPassword,
+} from '@/lib/auth'
 import { getTodayInSaoPaulo, isValidIsoDate } from '@/lib/date'
 import { getPool } from '@/lib/db'
-import { isValidEmail, normalizeEmail, normalizePhone } from '@/lib/validation'
+import {
+  consumeRateLimits,
+  getClientIdentifier,
+  rateLimitResponse,
+} from '@/lib/rate-limit'
+import { isValidEmail, MAX_PASSWORD_LENGTH, normalizeEmail, normalizePhone } from '@/lib/validation'
 
 type ProfileField =
   | 'name'
@@ -14,6 +23,7 @@ type ProfileField =
   | 'preferredCut'
   | 'beardStyle'
   | 'notes'
+  | 'currentPassword'
 
 function validateProfile(body: Record<string, unknown>) {
   const name = typeof body.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : ''
@@ -25,6 +35,7 @@ function validateProfile(body: Record<string, unknown>) {
   const preferredCut = typeof body.preferredCut === 'string' ? body.preferredCut.trim() : ''
   const beardStyle = typeof body.beardStyle === 'string' ? body.beardStyle.trim() : ''
   const notes = typeof body.notes === 'string' ? body.notes.trim() : ''
+  const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : ''
   const errors: Partial<Record<ProfileField, string>> = {}
 
   if (name.length < 3) errors.name = 'Informe seu nome completo.'
@@ -42,9 +53,12 @@ function validateProfile(body: Record<string, unknown>) {
   if (preferredCut.length > 100) errors.preferredCut = 'Use no máximo 100 caracteres.'
   if (beardStyle.length > 100) errors.beardStyle = 'Use no máximo 100 caracteres.'
   if (notes.length > 500) errors.notes = 'Use no máximo 500 caracteres.'
+  if (currentPassword.length > MAX_PASSWORD_LENGTH) {
+    errors.currentPassword = 'A senha atual informada é inválida.'
+  }
 
   return {
-    data: { name, phone, email, birthDate, preferredCut, beardStyle, notes },
+    data: { name, phone, email, birthDate, preferredCut, beardStyle, notes, currentPassword },
     errors,
   }
 }
@@ -71,6 +85,31 @@ export async function PATCH(request: Request) {
   try {
     const customer = await getAuthenticatedCustomer()
     if (!customer) return errorResponse('Faça login para continuar.', 401)
+    const emailChanged = data.email !== customer.email
+
+    if (emailChanged) {
+      const rateLimit = await consumeRateLimits([
+        {
+          action: 'profile-email-customer',
+          identifier: customer.id,
+          limit: 5,
+          windowSeconds: 15 * 60,
+        },
+        {
+          action: 'profile-email-ip',
+          identifier: getClientIdentifier(request),
+          limit: 15,
+          windowSeconds: 15 * 60,
+        },
+      ])
+      if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
+
+      if (!data.currentPassword || !(await verifyCustomerPassword(customer.id, data.currentPassword))) {
+        return errorResponse('Confirme sua senha atual para alterar o e-mail.', 422, {
+          currentPassword: 'A senha atual não confere.',
+        })
+      }
+    }
 
     await getPool().execute<ResultSetHeader>(
       `UPDATE customers
@@ -87,6 +126,7 @@ export async function PATCH(request: Request) {
         customer.id,
       ],
     )
+    if (emailChanged) await revokeOtherCustomerSessions(customer.id)
 
     return NextResponse.json({ message: 'Perfil atualizado com sucesso.' })
   } catch (error) {

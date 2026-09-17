@@ -1,4 +1,5 @@
 export const MAX_PASSWORD_LENGTH = 128
+export const MIN_PASSWORD_LENGTH = 12
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -32,8 +33,12 @@ export function getPasswordError(password: string) {
     return `A senha deve ter no máximo ${MAX_PASSWORD_LENGTH} caracteres.`
   }
 
-  if (password.length < 8 || !/[A-Za-zÀ-ÿ]/.test(password) || !/\d/.test(password)) {
-    return 'Use ao menos 8 caracteres, incluindo uma letra e um número.'
+  if (
+    password.length < MIN_PASSWORD_LENGTH ||
+    !/[A-Za-zÀ-ÿ]/.test(password) ||
+    !/\d/.test(password)
+  ) {
+    return `Use ao menos ${MIN_PASSWORD_LENGTH} caracteres, incluindo uma letra e um número.`
   }
 
   return null

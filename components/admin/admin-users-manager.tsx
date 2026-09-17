@@ -1,6 +1,7 @@
 'use client'
 
 import { type FormEvent, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { KeyRound, LoaderCircle, Pencil, Plus, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -25,6 +26,7 @@ function sortUsers(users: AdminUser[]) {
 }
 
 export function AdminUsersManager({ initial }: { initial: AdminUser[] }) {
+  const router = useRouter()
   const [users, setUsers] = useState(initial)
   const [editing, setEditing] = useState<AdminUser | null>(null)
   const [formKey, setFormKey] = useState(0)
@@ -63,6 +65,7 @@ export function AdminUsersManager({ initial }: { initial: AdminUser[] }) {
             name: data.get('name'),
             email: data.get('email'),
             password,
+            currentPassword: data.get('currentPassword'),
             isActive: editing ? editing.isCurrent || data.get('isActive') === 'on' : true,
           }),
         },
@@ -76,7 +79,8 @@ export function AdminUsersManager({ initial }: { initial: AdminUser[] }) {
 
       if (result.invalidatesCurrentSession) {
         toast.success('Senha atualizada. Entre novamente para continuar.')
-        window.location.assign('/admin/login')
+        router.replace('/admin/login')
+        router.refresh()
         return
       }
 
@@ -148,6 +152,18 @@ export function AdminUsersManager({ initial }: { initial: AdminUser[] }) {
                 autoComplete="new-password"
                 required={!editing}
               />
+            </label>
+            <label className="flex flex-col gap-1.5 text-sm font-medium">
+              Sua senha atual
+              <PasswordInput
+                name="currentPassword"
+                maxLength={128}
+                autoComplete="current-password"
+                required
+              />
+              <span className="text-xs font-normal text-muted-foreground">
+                Confirma sua identidade antes de alterar acessos administrativos.
+              </span>
             </label>
 
             {editing && (

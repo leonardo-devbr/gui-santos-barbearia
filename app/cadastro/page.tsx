@@ -16,6 +16,7 @@ import {
   getPasswordError,
   isValidEmail,
   MAX_PASSWORD_LENGTH,
+  MIN_PASSWORD_LENGTH,
   normalizeEmail,
   normalizePhone,
 } from '@/lib/validation'
@@ -193,7 +194,7 @@ export default function SignupPage() {
               name="password"
               autoComplete="new-password"
               placeholder="••••••••"
-              minLength={8}
+              minLength={MIN_PASSWORD_LENGTH}
               maxLength={MAX_PASSWORD_LENGTH}
               aria-invalid={Boolean(errors.password)}
               aria-describedby={errors.password ? 'password-error' : 'password-description'}
@@ -202,7 +203,7 @@ export default function SignupPage() {
             />
             {!errors.password && (
               <FieldDescription id="password-description">
-                Use ao menos 8 caracteres, incluindo uma letra e um número.
+                Use ao menos {MIN_PASSWORD_LENGTH} caracteres, incluindo uma letra e um número.
               </FieldDescription>
             )}
             <FieldError id="password-error">{errors.password}</FieldError>
@@ -214,7 +215,7 @@ export default function SignupPage() {
               name="passwordConfirmation"
               autoComplete="new-password"
               placeholder="Digite a senha novamente"
-              minLength={8}
+              minLength={MIN_PASSWORD_LENGTH}
               maxLength={MAX_PASSWORD_LENGTH}
               aria-invalid={Boolean(errors.passwordConfirmation)}
               aria-describedby={errors.passwordConfirmation ? 'password-confirmation-error' : undefined}

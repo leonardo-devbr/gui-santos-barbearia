@@ -1,13 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { CheckCircle2, KeyRound, LoaderCircle } from 'lucide-react'
 import { AuthShell } from '@/components/auth-shell'
 import { Button } from '@/components/ui/button'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
-import { getPasswordError, MAX_PASSWORD_LENGTH } from '@/lib/validation'
+import { getPasswordError, MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from '@/lib/validation'
 
 type ResetPasswordField = 'password' | 'passwordConfirmation'
 type ResetPasswordErrors = Partial<Record<ResetPasswordField, string>>
@@ -39,6 +39,12 @@ export function ResetPasswordForm({ token }: { token?: string }) {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCompleted, setIsCompleted] = useState(false)
+
+  useEffect(() => {
+    if (token && window.location.search) {
+      window.history.replaceState(window.history.state, '', '/redefinir-senha')
+    }
+  }, [token])
 
   function clearError(field: ResetPasswordField) {
     setErrors((current) => {
@@ -149,7 +155,7 @@ export function ResetPasswordForm({ token }: { token?: string }) {
               id="new-password"
               name="password"
               autoComplete="new-password"
-              minLength={8}
+              minLength={MIN_PASSWORD_LENGTH}
               maxLength={MAX_PASSWORD_LENGTH}
               aria-invalid={Boolean(errors.password)}
               aria-describedby={errors.password ? 'new-password-error' : 'new-password-description'}
@@ -158,7 +164,7 @@ export function ResetPasswordForm({ token }: { token?: string }) {
             />
             {!errors.password && (
               <FieldDescription id="new-password-description">
-                Use ao menos 8 caracteres, incluindo uma letra e um número.
+                Use ao menos {MIN_PASSWORD_LENGTH} caracteres, incluindo uma letra e um número.
               </FieldDescription>
             )}
             <FieldError id="new-password-error">{errors.password}</FieldError>
@@ -169,7 +175,7 @@ export function ResetPasswordForm({ token }: { token?: string }) {
               id="new-password-confirmation"
               name="passwordConfirmation"
               autoComplete="new-password"
-              minLength={8}
+              minLength={MIN_PASSWORD_LENGTH}
               maxLength={MAX_PASSWORD_LENGTH}
               aria-invalid={Boolean(errors.passwordConfirmation)}
               aria-describedby={errors.passwordConfirmation ? 'new-password-confirmation-error' : undefined}
