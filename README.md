@@ -127,7 +127,7 @@ Os lembretes e as novas tentativas de envio exigem um segredo. Gere um valor ale
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-Copie o resultado para o `.env.local`:
+Copie o resultado para o `.env.local`. O segredo precisa ter pelo menos 32 caracteres:
 
 ```env
 CRON_SECRET="valor-aleatorio-gerado"

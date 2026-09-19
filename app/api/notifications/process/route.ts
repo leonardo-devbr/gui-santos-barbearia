@@ -8,7 +8,7 @@ function hasValidAuthorization(request: Request) {
   const authorization = request.headers.get('authorization')
   const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : ''
 
-  if (!secret || !token) return false
+  if (!secret || Buffer.byteLength(secret, 'utf8') < 32 || !token) return false
 
   const expected = Buffer.from(secret)
   const received = Buffer.from(token)
