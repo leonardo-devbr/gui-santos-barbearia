@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { createHash } from 'node:crypto'
+import { isIP } from 'node:net'
 import { NextResponse } from 'next/server'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { getPool } from '@/lib/db'
@@ -9,6 +10,9 @@ interface RateLimitRow extends RowDataPacket {
   hit_count: number
   retry_after: number
 }
+
+const trustedIpHeaders = new Set(['cf-connecting-ip', 'x-real-ip', 'x-forwarded-for'])
+const CLEANUP_BATCH_SIZE = 500
 
 export interface RateLimitOptions {
   action: string
@@ -22,15 +26,24 @@ function getBucketKey(action: string, identifier: string) {
 }
 
 export function getClientIdentifier(request: Request) {
-  const platformAddress =
-    request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip')
-  const forwardedAddress = request.headers.get('x-forwarded-for')?.split(',', 1)[0]
-  const address = (platformAddress || forwardedAddress || 'unknown').trim()
+  const configuredHeader = process.env.TRUSTED_PROXY_IP_HEADER?.trim().toLowerCase()
+  if (!configuredHeader) return 'unknown'
+  if (!trustedIpHeaders.has(configuredHeader)) {
+    throw new Error(
+      'TRUSTED_PROXY_IP_HEADER deve ser cf-connecting-ip, x-real-ip ou x-forwarded-for.',
+    )
+  }
 
-  return address.slice(0, 128) || 'unknown'
+  const rawAddress = request.headers.get(configuredHeader)
+  const address =
+    configuredHeader === 'x-forwarded-for'
+      ? rawAddress?.split(',', 1)[0].trim()
+      : rawAddress?.trim()
+
+  return address && isIP(address) ? address : 'unknown'
 }
 
-export async function consumeRateLimit({
+async function consumeRateLimit({
   action,
   identifier,
   limit,
@@ -79,7 +92,18 @@ export async function consumeRateLimit({
   }
 }
 
+async function purgeExpiredRateLimits() {
+  await getPool().execute<ResultSetHeader>(
+    `DELETE FROM security_rate_limits
+     WHERE expires_at <= UTC_TIMESTAMP()
+     ORDER BY expires_at
+     LIMIT ${CLEANUP_BATCH_SIZE}`,
+  )
+}
+
 export async function consumeRateLimits(limits: RateLimitOptions[]) {
+  await purgeExpiredRateLimits()
+
   for (const limit of limits) {
     const result = await consumeRateLimit(limit)
     if (!result.allowed) return result

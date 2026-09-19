@@ -162,6 +162,7 @@ Antes de publicar o site:
 - defina `MYSQL_SSL=true` quando o MySQL estiver em outro servidor; se o provedor fornecer uma autoridade certificadora própria, informe o certificado PEM em base64 por `MYSQL_SSL_CA_BASE64`;
 - guarde senhas e segredos nas variáveis protegidas da hospedagem, nunca em um arquivo enviado ao GitHub;
 - configure SMTP com TLS, um remetente do domínio e credenciais exclusivas da aplicação;
+- configure `TRUSTED_PROXY_IP_HEADER` com o cabeçalho de IP garantido pela hospedagem (`cf-connecting-ip`, `x-real-ip` ou `x-forwarded-for`); nunca confie em um cabeçalho que chega diretamente da internet;
 - gere um `CRON_SECRET` longo e diferente das demais senhas;
 - mantenha `DEV_EXPOSE_PASSWORD_RESET_URL=false` e remova `ADMIN_PASSWORD`, `MYSQL_SETUP_USER` e `MYSQL_SETUP_PASSWORD` depois das tarefas de configuração.
 
