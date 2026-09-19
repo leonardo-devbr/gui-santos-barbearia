@@ -105,18 +105,34 @@ export function getPool() {
   return global.mysqlPool
 }
 
-export async function withTransaction<T>(work: (connection: PoolConnection) => Promise<T>) {
-  const connection = await getPool().getConnection()
+function isDeadlockError(error: unknown) {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === 'ER_LOCK_DEADLOCK',
+  )
+}
 
-  try {
-    await connection.beginTransaction()
-    const result = await work(connection)
-    await connection.commit()
-    return result
-  } catch (error) {
-    await connection.rollback()
-    throw error
-  } finally {
-    connection.release()
+export async function withTransaction<T>(work: (connection: PoolConnection) => Promise<T>) {
+  let lastError: unknown
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const connection = await getPool().getConnection()
+
+    try {
+      await connection.beginTransaction()
+      const result = await work(connection)
+      await connection.commit()
+      return result
+    } catch (error) {
+      lastError = error
+      await connection.rollback()
+      if (!isDeadlockError(error) || attempt === 3) throw error
+    } finally {
+      connection.release()
+    }
   }
+
+  throw lastError instanceof Error ? lastError : new Error('A transação não pôde ser concluída.')
 }

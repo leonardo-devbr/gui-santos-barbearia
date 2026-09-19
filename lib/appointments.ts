@@ -380,6 +380,54 @@ async function ensureNoConflict(
   }
 }
 
+async function ensureCustomerHasNoConflict(
+  connection: PoolConnection,
+  customerId: string,
+  input: AppointmentInput,
+  durationMinutes: number,
+  excludedAppointmentId?: string,
+) {
+  const parameters: Array<string | number> = [
+    customerId,
+    input.date,
+    `${input.time}:00`,
+    durationMinutes,
+    `${input.time}:00`,
+  ]
+  let exclusionClause = ''
+
+  if (excludedAppointmentId) {
+    exclusionClause = 'AND id <> ?'
+    parameters.push(excludedAppointmentId)
+  }
+
+  const [conflicts] = await connection.execute<IdRow[]>(
+    `SELECT id
+     FROM appointments
+     WHERE customer_id = ?
+       AND appointment_date = ?
+       AND status IN ('confirmado', 'pendente')
+       AND TIME_TO_SEC(appointment_time) < TIME_TO_SEC(?) + ? * 60
+       AND TIME_TO_SEC(appointment_time) + duration_minutes * 60 > TIME_TO_SEC(?)
+       ${exclusionClause}
+     LIMIT 1
+     FOR UPDATE`,
+    parameters,
+  )
+
+  if (conflicts[0]) {
+    throw new AppointmentError('Você já possui um agendamento neste período.', 409)
+  }
+}
+
+async function lockCustomer(connection: PoolConnection, customerId: string) {
+  const [customerRows] = await connection.execute<IdRow[]>(
+    'SELECT id FROM customers WHERE id = ? LIMIT 1 FOR UPDATE',
+    [customerId],
+  )
+  if (!customerRows[0]) throw new AppointmentError('Cliente não encontrado.', 404)
+}
+
 async function ensureNoScheduleBlock(
   connection: PoolConnection,
   input: AppointmentInput,
@@ -409,11 +457,7 @@ async function ensureNoScheduleBlock(
 
 export async function createAppointment(customerId: string, input: AppointmentInput) {
   return withTransaction(async (connection) => {
-    const [customerRows] = await connection.execute<IdRow[]>(
-      'SELECT id FROM customers WHERE id = ? LIMIT 1 FOR UPDATE',
-      [customerId],
-    )
-    if (!customerRows[0]) throw new AppointmentError('Cliente não encontrado.', 404)
+    await lockCustomer(connection, customerId)
 
     const now = getNowInSaoPaulo()
     const [countRows] = await connection.execute<CountRow[]>(
@@ -434,6 +478,7 @@ export async function createAppointment(customerId: string, input: AppointmentIn
     const service = await getBookingResources(connection, input)
     await ensureNoScheduleBlock(connection, input, service.duration_minutes)
     await ensureNoConflict(connection, input, service.duration_minutes)
+    await ensureCustomerHasNoConflict(connection, customerId, input, service.duration_minutes)
 
     const id = randomUUID()
     await connection.execute<ResultSetHeader>(
@@ -462,6 +507,8 @@ export async function rescheduleAppointment(
   input: AppointmentInput,
 ) {
   return withTransaction(async (connection) => {
+    await lockCustomer(connection, customerId)
+
     const [appointmentRows] = await connection.execute<OwnedAppointmentRow[]>(
       `SELECT id, service_id, barber_id, status, appointment_date, appointment_time
        FROM appointments
@@ -491,6 +538,13 @@ export async function rescheduleAppointment(
     const service = await getBookingResources(connection, input)
     await ensureNoScheduleBlock(connection, input, service.duration_minutes)
     await ensureNoConflict(connection, input, service.duration_minutes, appointmentId)
+    await ensureCustomerHasNoConflict(
+      connection,
+      customerId,
+      input,
+      service.duration_minutes,
+      appointmentId,
+    )
 
     await connection.execute<ResultSetHeader>(
       `UPDATE appointments

@@ -256,7 +256,7 @@ Resposta de sucesso:
 | `PATCH` | `/api/appointments/:id` | `{ "serviceId", "barberId", "date", "time" }` | Remarca um agendamento pertencente ao cliente autenticado. |
 | `DELETE` | `/api/appointments/:id` | Sem corpo | Cancela um agendamento pertencente ao cliente autenticado. |
 
-A disponibilidade exibida no navegador é apenas informativa. Ao criar ou remarcar, o backend valida novamente o horário dentro de uma transação para impedir dois agendamentos simultâneos para o mesmo barbeiro. Cada cliente pode manter até cinco agendamentos futuros ativos, e os horários são liberados com no máximo 90 dias de antecedência. Reenviar uma remarcação sem mudanças não gera uma notificação duplicada.
+A disponibilidade exibida no navegador é apenas informativa. Ao criar ou remarcar, o backend valida novamente o horário dentro de uma transação para impedir dois agendamentos simultâneos para o mesmo barbeiro e horários sobrepostos para o mesmo cliente. Cada cliente pode manter até cinco agendamentos futuros ativos, e os horários são liberados com no máximo 90 dias de antecedência. Reenviar uma remarcação sem mudanças não gera uma notificação duplicada.
 
 ### Notificações
 
