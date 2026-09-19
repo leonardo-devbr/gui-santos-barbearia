@@ -230,23 +230,16 @@ CREATE TABLE IF NOT EXISTS email_notifications (
     FOREIGN KEY (appointment_id) REFERENCES appointments (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-INSERT INTO services (id, name, description, duration_minutes, price, category)
+INSERT IGNORE INTO services (id, name, description, duration_minutes, price, category)
 VALUES
   ('corte', 'Corte', 'Degradê, social ou corte tradicional.', 45, 40.00, 'cortes'),
   ('barba', 'Barba', 'Modelagem completa com navalha e toalha quente.', 30, 35.00, 'barba'),
   ('corte-barba', 'Corte + Barba', 'O combo completo para um visual impecável.', 75, 65.00, 'combos'),
   ('sobrancelha', 'Sobrancelha', 'Alinhamento e limpeza com navalha.', 15, 15.00, 'acabamentos'),
   ('acabamento', 'Acabamento', 'Retoque de contorno e nuca entre cortes.', 20, 20.00, 'acabamentos'),
-  ('corte-infantil', 'Corte Infantil', 'Corte especial para os pequenos, com paciência e cuidado.', 40, 35.00, 'cortes')
-ON DUPLICATE KEY UPDATE
-  name = VALUES(name),
-  description = VALUES(description),
-  duration_minutes = VALUES(duration_minutes),
-  price = VALUES(price),
-  category = VALUES(category),
-  is_active = TRUE;
+  ('corte-infantil', 'Corte Infantil', 'Corte especial para os pequenos, com paciência e cuidado.', 40, 35.00, 'cortes');
 
-INSERT INTO barbers (id, name, specialty, rating, review_count, bio, photo_url)
+INSERT IGNORE INTO barbers (id, name, specialty, rating, review_count, bio, photo_url)
 VALUES
   (
     'guilherme',
@@ -265,15 +258,7 @@ VALUES
     134,
     'Especialista em degradê e corte masculino, com atenção aos detalhes para um resultado preciso.',
     '/images/b123ae60-0e4a-479b-aba0-a533ed6f4a98.jpg'
-  )
-ON DUPLICATE KEY UPDATE
-  name = VALUES(name),
-  specialty = VALUES(specialty),
-  rating = VALUES(rating),
-  review_count = VALUES(review_count),
-  bio = VALUES(bio),
-  photo_url = VALUES(photo_url),
-  is_active = TRUE;
+  );
 
 INSERT IGNORE INTO business_settings
   (id, name, street, district, city, state, postal_code, phone, email, latitude, longitude, parking_info, transit_info, cnpj)

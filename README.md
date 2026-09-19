@@ -79,7 +79,7 @@ O resultado esperado é:
 Banco gui_santos_barbearia preparado com sucesso.
 ```
 
-Esse comando pode ser executado novamente com segurança. Ele mantém clientes e agendamentos existentes e atualiza o catálogo inicial de serviços e barbeiros.
+Esse comando pode ser executado novamente com segurança. Ele mantém clientes, agendamentos e personalizações existentes, aplica as migrações conhecidas e insere somente os dados iniciais que ainda não existem. Serviços e barbeiros editados ou desativados no painel não são sobrescritos.
 
 Em um servidor, o comando também pode usar uma credencial temporária com permissão para criar ou alterar tabelas. Defina `MYSQL_SETUP_USER` e `MYSQL_SETUP_PASSWORD`, execute `db:setup` e depois remova essas duas variáveis do ambiente da aplicação. O site continuará usando `MYSQL_USER` e `MYSQL_PASSWORD` normalmente.
 

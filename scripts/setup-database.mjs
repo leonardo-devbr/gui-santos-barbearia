@@ -90,8 +90,56 @@ const databaseConnection = await mysql.createConnection({
   multipleStatements: true,
 })
 
+async function hasAppointmentColumn(name) {
+  const [rows] = await databaseConnection.execute(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'appointments' AND column_name = ?
+     LIMIT 1`,
+    [name],
+  )
+  return Boolean(rows[0])
+}
+
+async function hasAppointmentIndex(name) {
+  const [rows] = await databaseConnection.execute(
+    `SELECT 1
+     FROM information_schema.statistics
+     WHERE table_schema = DATABASE() AND table_name = 'appointments' AND index_name = ?
+     LIMIT 1`,
+    [name],
+  )
+  return Boolean(rows[0])
+}
+
+async function migrateLegacyAppointments() {
+  if (!(await hasAppointmentColumn('active_slot'))) {
+    await databaseConnection.query(
+      `ALTER TABLE appointments
+       ADD COLUMN active_slot BOOLEAN GENERATED ALWAYS AS (
+         IF(status IN ('confirmado', 'pendente'), TRUE, NULL)
+       ) STORED AFTER status`,
+    )
+  }
+
+  if (!(await hasAppointmentIndex('appointments_active_start_unique'))) {
+    await databaseConnection.query(
+      `ALTER TABLE appointments
+       ADD UNIQUE INDEX appointments_active_start_unique
+         (barber_id, appointment_date, appointment_time, active_slot)`,
+    )
+  }
+
+  if (await hasAppointmentIndex('appointments_barber_start_unique')) {
+    await databaseConnection.query(
+      'ALTER TABLE appointments DROP INDEX appointments_barber_start_unique',
+    )
+  }
+}
+
 try {
   await databaseConnection.query(schema)
+  await migrateLegacyAppointments()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {
   await databaseConnection.end()
