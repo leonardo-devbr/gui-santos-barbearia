@@ -166,7 +166,7 @@ Antes de publicar o site:
 - gere um `CRON_SECRET` longo e diferente das demais senhas;
 - mantenha `DEV_EXPOSE_PASSWORD_RESET_URL=false` e remova `ADMIN_PASSWORD`, `MYSQL_SETUP_USER` e `MYSQL_SETUP_PASSWORD` depois das tarefas de configuração.
 
-Para o banco remoto, `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD` e `MYSQL_DATABASE` devem ser definidos explicitamente. A aplicação recusa uma conexão remota sem TLS em produção; bancos locais em `localhost` ou `127.0.0.1` continuam funcionando com `MYSQL_SSL=false`.
+Em produção, `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD` e `MYSQL_DATABASE` devem ser definidos explicitamente, a senha não pode ficar vazia e `MYSQL_USER` não pode ser `root`. A aplicação recusa uma conexão remota sem TLS; bancos locais em `localhost` ou `127.0.0.1` continuam funcionando com `MYSQL_SSL=false` durante o desenvolvimento.
 
 ### Atualizando uma cópia já existente
 

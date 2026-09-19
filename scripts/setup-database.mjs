@@ -47,12 +47,26 @@ const host = process.env.MYSQL_HOST?.trim() || '127.0.0.1'
 const port = Number(process.env.MYSQL_PORT ?? 3306)
 const applicationUser = process.env.MYSQL_USER?.trim() || 'root'
 const setupUser = process.env.MYSQL_SETUP_USER?.trim()
+const connectionUser = setupUser || applicationUser
+const connectionPassword = setupUser
+  ? (process.env.MYSQL_SETUP_PASSWORD ?? '')
+  : (process.env.MYSQL_PASSWORD ?? '')
 
 if (process.env.MYSQL_SETUP_PASSWORD !== undefined && !setupUser) {
   throw new Error('MYSQL_SETUP_PASSWORD exige MYSQL_SETUP_USER.')
 }
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('MYSQL_PORT deve ser uma porta válida.')
+}
+if (process.env.NODE_ENV === 'production') {
+  const missing = ['MYSQL_HOST', 'MYSQL_USER', 'MYSQL_DATABASE'].filter(
+    (key) => !process.env[key]?.trim(),
+  )
+  if (missing.length > 0) throw new Error(`Configure ${missing.join(', ')} em produção.`)
+  if (!connectionPassword) throw new Error('A senha do MySQL não pode ficar vazia em produção.')
+  if (applicationUser.toLowerCase() === 'root') {
+    throw new Error('MYSQL_USER deve usar uma conta exclusiva da aplicação em produção.')
+  }
 }
 
 if (!/^[a-zA-Z0-9_]+$/.test(databaseName)) {
@@ -63,10 +77,8 @@ const ssl = getSslConfig(host)
 const connectionOptions = {
   host,
   port,
-  user: setupUser || applicationUser,
-  password: setupUser
-    ? (process.env.MYSQL_SETUP_PASSWORD ?? '')
-    : (process.env.MYSQL_PASSWORD ?? ''),
+  user: connectionUser,
+  password: connectionPassword,
   ...(ssl ? { ssl } : {}),
   charset: 'utf8mb4',
   timezone: 'Z',

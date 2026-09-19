@@ -51,6 +51,7 @@ const databaseName = process.env.MYSQL_DATABASE?.trim() || 'gui_santos_barbearia
 const host = process.env.MYSQL_HOST?.trim() || '127.0.0.1'
 const port = Number(process.env.MYSQL_PORT ?? 3306)
 const user = process.env.MYSQL_USER?.trim() || 'root'
+const mysqlPassword = process.env.MYSQL_PASSWORD ?? ''
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('MYSQL_PORT deve ser uma porta válida.')
@@ -60,8 +61,9 @@ if (process.env.NODE_ENV === 'production') {
     (key) => !process.env[key]?.trim(),
   )
   if (missing.length > 0) throw new Error(`Configure ${missing.join(', ')} em produção.`)
-  if (!isLoopbackHost(host) && !process.env.MYSQL_PASSWORD) {
-    throw new Error('MYSQL_PASSWORD não pode ficar vazia para um banco remoto em produção.')
+  if (!mysqlPassword) throw new Error('MYSQL_PASSWORD não pode ficar vazia em produção.')
+  if (user.toLowerCase() === 'root') {
+    throw new Error('MYSQL_USER deve usar uma conta exclusiva da aplicação em produção.')
   }
 }
 
@@ -93,7 +95,7 @@ const connection = await mysql.createConnection({
   host,
   port,
   user,
-  password: process.env.MYSQL_PASSWORD ?? '',
+  password: mysqlPassword,
   database: databaseName,
   ...(ssl ? { ssl } : {}),
   charset: 'utf8mb4',

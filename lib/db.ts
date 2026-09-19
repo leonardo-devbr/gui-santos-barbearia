@@ -65,8 +65,9 @@ function getDatabaseConfig() {
     if (missing.length > 0) {
       throw new Error(`Configure ${missing.join(', ')} no ambiente de produção.`)
     }
-    if (!isLoopbackHost(host) && !password) {
-      throw new Error('MYSQL_PASSWORD não pode ficar vazia para um banco remoto em produção.')
+    if (!password) throw new Error('MYSQL_PASSWORD não pode ficar vazia em produção.')
+    if (user.toLowerCase() === 'root') {
+      throw new Error('MYSQL_USER deve usar uma conta exclusiva da aplicação em produção.')
     }
   }
 
