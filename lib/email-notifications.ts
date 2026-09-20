@@ -42,6 +42,9 @@ interface NotificationIdRow extends RowDataPacket {
   id: string
 }
 
+const NOTIFICATION_RETENTION_DAYS = 90
+const NOTIFICATION_CLEANUP_BATCH_SIZE = 1000
+
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message.slice(0, 500)
   return 'Falha desconhecida ao enviar o e-mail.'
@@ -190,6 +193,14 @@ export async function processAppointmentNotifications() {
        AND updated_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 15 MINUTE)`,
   )
 
+  const [cleanupResult] = await pool.execute<ResultSetHeader>(
+    `DELETE FROM email_notifications
+     WHERE status <> 'processing'
+       AND created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${NOTIFICATION_RETENTION_DAYS} DAY)
+     ORDER BY created_at ASC
+     LIMIT ${NOTIFICATION_CLEANUP_BATCH_SIZE}`,
+  )
+
   const [appointments] = await pool.execute<AppointmentIdRow[]>(
     `SELECT id
      FROM appointments
@@ -223,6 +234,7 @@ export async function processAppointmentNotifications() {
 
   return {
     reminderDate,
+    purged: cleanupResult.affectedRows,
     queued,
     processed: notifications.length,
     sent,

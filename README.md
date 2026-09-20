@@ -205,6 +205,7 @@ As senhas usam derivação `scrypt` e novas senhas exigem ao menos 12 caracteres
 Recuperação de senha, verificação de endereço, confirmação, remarcação, cancelamento e lembrete de agendamento possuem e-mails próprios. Sem SMTP, o desenvolvimento mostra uma prévia no terminal. Links só aparecem diretamente na tela local com as opções explícitas `DEV_EXPOSE_PASSWORD_RESET_URL` ou `DEV_EXPOSE_EMAIL_VERIFICATION_URL`; isso nunca ocorre em produção. Em produção, `APP_URL` com HTTPS e as credenciais SMTP são obrigatórios para a entrega real.
 
 As notificações de agendamento são registradas em uma fila no MySQL. Uma indisponibilidade do provedor de e-mail não desfaz o agendamento: a mensagem fica marcada como falha e o processador pode tentar novamente até três vezes.
+O processador também elimina, em lotes, notificações concluídas ou abandonadas há mais de 90 dias, evitando manter indefinidamente destinatários e cópias do conteúdo enviado.
 
 A API rejeita origens incompatíveis em operações que alteram dados, limita o corpo JSON, aplica limites de tentativas em autenticação e agenda e envia cabeçalhos de segurança no navegador. Trocar o e-mail do cliente ou gerenciar contas administrativas exige confirmar a senha atual.
 

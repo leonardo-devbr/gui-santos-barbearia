@@ -42,5 +42,5 @@ if (!response.ok) {
 }
 
 console.log(
-  `Notificações processadas: ${body.processed}; enviadas: ${body.sent}; falhas: ${body.failed}; lembretes criados: ${body.queued}.`,
+  `Notificações processadas: ${body.processed}; enviadas: ${body.sent}; falhas: ${body.failed}; lembretes criados: ${body.queued}; registros antigos removidos: ${body.purged}.`,
 )
