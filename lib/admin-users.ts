@@ -1,8 +1,8 @@
 import 'server-only'
 
 import { randomUUID } from 'node:crypto'
-import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
-import { getAuthenticatedAdmin } from '@/lib/admin-auth'
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
+import { getAuthenticatedAdmin, getCurrentStaffSessionTokenHash } from '@/lib/admin-auth'
 import { hashPassword, verifyPassword } from '@/lib/auth'
 import { getPool, withTransaction } from '@/lib/db'
 import type { AdminUser } from '@/lib/types'
@@ -78,17 +78,32 @@ function validatePassword(value: unknown, required: boolean) {
   return password
 }
 
-async function requireCurrentAdminPassword(adminId: string, value: unknown) {
+async function requireCurrentAdminPassword(
+  connection: PoolConnection,
+  adminId: string,
+  sessionTokenHash: string,
+  value: unknown,
+) {
   const password = typeof value === 'string' ? value : ''
   if (!password || password.length > MAX_PASSWORD_LENGTH) {
     throw new AdminUserError('Informe sua senha atual para confirmar esta operação.', 422)
   }
 
-  const [rows] = await getPool().execute<PasswordRow[]>(
-    'SELECT password_hash FROM staff_users WHERE id = ? AND is_active = TRUE LIMIT 1',
-    [adminId],
+  const [rows] = await connection.execute<PasswordRow[]>(
+    `SELECT staff_users.password_hash
+     FROM staff_sessions
+     INNER JOIN staff_users ON staff_users.id = staff_sessions.staff_user_id
+     WHERE staff_sessions.token_hash = ?
+       AND staff_sessions.staff_user_id = ?
+       AND staff_sessions.expires_at > UTC_TIMESTAMP()
+       AND staff_users.role = 'admin'
+       AND staff_users.is_active = TRUE
+     LIMIT 1
+     FOR UPDATE`,
+    [sessionTokenHash, adminId],
   )
-  if (!rows[0] || !(await verifyPassword(password, rows[0].password_hash))) {
+  if (!rows[0]) throw new AdminUserError('Acesso administrativo não autorizado.', 401)
+  if (!(await verifyPassword(password, rows[0].password_hash))) {
     throw new AdminUserError('A senha atual não confere.', 403)
   }
 }
@@ -106,12 +121,19 @@ export async function getAdminUsers() {
 
 export async function createAdminUser(body: Record<string, unknown>) {
   const admin = await requireAdminAccess()
-  await requireCurrentAdminPassword(admin.id, body.currentPassword)
+  const sessionTokenHash = await getCurrentStaffSessionTokenHash()
+  if (!sessionTokenHash) throw new AdminUserError('Acesso administrativo não autorizado.', 401)
   const identity = validateIdentity(body)
   const password = validatePassword(body.password, true)!
   const passwordHash = await hashPassword(password)
 
   return withTransaction(async (connection) => {
+    await requireCurrentAdminPassword(
+      connection,
+      admin.id,
+      sessionTokenHash,
+      body.currentPassword,
+    )
     const [duplicates] = await connection.execute<IdRow[]>(
       'SELECT id FROM staff_users WHERE email = ? LIMIT 1 FOR UPDATE',
       [identity.email],
@@ -136,7 +158,8 @@ export async function createAdminUser(body: Record<string, unknown>) {
 
 export async function updateAdminUser(id: string, body: Record<string, unknown>) {
   const admin = await requireAdminAccess()
-  await requireCurrentAdminPassword(admin.id, body.currentPassword)
+  const sessionTokenHash = await getCurrentStaffSessionTokenHash()
+  if (!sessionTokenHash) throw new AdminUserError('Acesso administrativo não autorizado.', 401)
   if (!id || id.length > 64) throw new AdminUserError('Administrador não encontrado.', 404)
   const identity = validateIdentity(body)
   const password = validatePassword(body.password, false)
@@ -149,6 +172,12 @@ export async function updateAdminUser(id: string, body: Record<string, unknown>)
   const passwordHash = password ? await hashPassword(password) : null
 
   return withTransaction(async (connection) => {
+    await requireCurrentAdminPassword(
+      connection,
+      admin.id,
+      sessionTokenHash,
+      body.currentPassword,
+    )
     const [users] = await connection.execute<IdRow[]>(
       `SELECT id
        FROM staff_users
