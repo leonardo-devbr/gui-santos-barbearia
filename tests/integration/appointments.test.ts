@@ -1,0 +1,359 @@
+import { randomBytes, randomUUID } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
+import mysql, {
+  type Connection,
+  type Pool,
+  type ResultSetHeader,
+  type RowDataPacket,
+} from 'mysql2/promise'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { addDaysToIsoDate, getTodayInSaoPaulo } from '@/lib/date'
+import type { AppointmentInput } from '@/lib/appointments'
+
+interface AppointmentDatabaseRow extends RowDataPacket {
+  id: string
+  customer_id: string
+  service_id: string
+  barber_id: string
+  appointment_date: string
+  appointment_time: string
+  status: string
+  price: number
+  duration_minutes: number
+}
+
+interface CountRow extends RowDataPacket {
+  total: number
+}
+
+const TEST_DATABASE_PREFIX = 'gui_santos_barbearia_test_'
+const testDatabase = `${TEST_DATABASE_PREFIX}${process.pid}_${randomBytes(4).toString('hex')}`
+const testDatabasePattern = /^gui_santos_barbearia_test_\d+_[a-f0-9]{8}$/
+const localHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+const staffUserId = '00000000-0000-4000-8000-000000000001'
+const environmentKeys = [
+  'MYSQL_HOST',
+  'MYSQL_PORT',
+  'MYSQL_USER',
+  'MYSQL_PASSWORD',
+  'MYSQL_DATABASE',
+  'MYSQL_SSL',
+] as const
+const originalEnvironment = new Map(
+  environmentKeys.map((name) => [name, process.env[name]] as const),
+)
+
+let adminConnection: Connection | undefined
+let applicationPool: Pool
+let databaseCreated = false
+let appointmentModule: typeof import('@/lib/appointments')
+let databaseModule: typeof import('@/lib/db')
+
+function restoreEnvironment() {
+  for (const name of environmentKeys) {
+    const value = originalEnvironment.get(name)
+    if (value === undefined) delete process.env[name]
+    else process.env[name] = value
+  }
+}
+
+function findNextOpenDate() {
+  let date = addDaysToIsoDate(getTodayInSaoPaulo(), 1)
+
+  for (let attempt = 0; attempt < 7; attempt += 1) {
+    const weekday = new Date(`${date}T12:00:00.000Z`).getUTCDay()
+    if (weekday >= 2 && weekday <= 6) return date
+    date = addDaysToIsoDate(date, 1)
+  }
+
+  throw new Error('Não foi possível encontrar um dia de atendimento para o teste.')
+}
+
+async function createCustomer(label: string) {
+  const id = randomUUID()
+  await applicationPool.execute<ResultSetHeader>(
+    `INSERT INTO customers
+      (id, name, phone, email, email_verified_at, password_hash)
+     VALUES (?, ?, '11999999999', ?, UTC_TIMESTAMP(), 'scrypt:test')`,
+    [id, `Cliente ${label}`, `${label}-${id}@example.test`],
+  )
+  return id
+}
+
+function appointmentInput(
+  date: string,
+  time: string,
+  barberId = 'guilherme',
+  serviceId = 'corte',
+): AppointmentInput {
+  return { serviceId, barberId, date, time }
+}
+
+function expectSingleConflict(results: PromiseSettledResult<unknown>[]) {
+  const successes = results.filter((result) => result.status === 'fulfilled')
+  const failures = results.filter(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
+  )
+
+  expect(successes).toHaveLength(1)
+  expect(failures).toHaveLength(1)
+  expect(failures[0].reason).toBeInstanceOf(appointmentModule.AppointmentError)
+  expect((failures[0].reason as InstanceType<typeof appointmentModule.AppointmentError>).status).toBe(
+    409,
+  )
+}
+
+beforeAll(async () => {
+  if (!testDatabasePattern.test(testDatabase)) {
+    throw new Error('O nome do banco temporário não passou pela validação de segurança.')
+  }
+
+  const host = process.env.MYSQL_HOST?.trim() || '127.0.0.1'
+  if (!localHosts.has(host.toLowerCase())) {
+    throw new Error('Os testes de integração só podem criar bancos em uma instância MySQL local.')
+  }
+
+  const port = Number(process.env.MYSQL_PORT ?? 3306)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('MYSQL_PORT deve ser uma porta válida para executar os testes.')
+  }
+
+  const setupUser =
+    process.env.MYSQL_SETUP_USER?.trim() || process.env.MYSQL_USER?.trim() || 'root'
+  const setupPassword = process.env.MYSQL_SETUP_PASSWORD ?? process.env.MYSQL_PASSWORD ?? ''
+  const connectionOptions = {
+    host,
+    port,
+    user: setupUser,
+    password: setupPassword,
+    charset: 'utf8mb4',
+    connectTimeout: 10_000,
+  }
+
+  adminConnection = await mysql.createConnection(connectionOptions)
+  await adminConnection.query(
+    `CREATE DATABASE \`${testDatabase}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
+  )
+  databaseCreated = true
+
+  const schemaConnection = await mysql.createConnection({
+    ...connectionOptions,
+    database: testDatabase,
+    multipleStatements: true,
+  })
+
+  try {
+    const schemaPath = fileURLToPath(new URL('../../database/schema.sql', import.meta.url))
+    const schema = await readFile(schemaPath, 'utf8')
+    await schemaConnection.query(schema)
+  } finally {
+    await schemaConnection.end()
+  }
+
+  process.env.MYSQL_HOST = host
+  process.env.MYSQL_PORT = String(port)
+  process.env.MYSQL_USER = setupUser
+  process.env.MYSQL_PASSWORD = setupPassword
+  process.env.MYSQL_DATABASE = testDatabase
+  process.env.MYSQL_SSL = 'false'
+  global.mysqlPool = undefined
+
+  databaseModule = await import('@/lib/db')
+  appointmentModule = await import('@/lib/appointments')
+  applicationPool = databaseModule.getPool()
+})
+
+beforeEach(async () => {
+  for (const table of [
+    'email_notifications',
+    'schedule_blocks',
+    'appointments',
+    'sessions',
+    'password_reset_tokens',
+    'email_verification_tokens',
+    'customers',
+    'staff_sessions',
+    'staff_users',
+    'security_rate_limits',
+  ]) {
+    await applicationPool.query(`DELETE FROM \`${table}\``)
+  }
+
+  await applicationPool.execute<ResultSetHeader>(
+    `INSERT INTO staff_users (id, name, email, password_hash, role)
+     VALUES (?, 'Administrador dos testes', 'admin@example.test', 'scrypt:test', 'admin')`,
+    [staffUserId],
+  )
+})
+
+afterAll(async () => {
+  try {
+    if (global.mysqlPool) {
+      await global.mysqlPool.end()
+      global.mysqlPool = undefined
+    }
+
+    if (adminConnection && databaseCreated) {
+      if (!testDatabasePattern.test(testDatabase)) {
+        throw new Error('A remoção do banco temporário foi bloqueada por segurança.')
+      }
+      await adminConnection.query(`DROP DATABASE \`${testDatabase}\``)
+    }
+  } finally {
+    await adminConnection?.end()
+    restoreEnvironment()
+  }
+})
+
+describe('agendamentos com MySQL', () => {
+  it('cria um agendamento com os dados atuais do serviço', async () => {
+    const customerId = await createCustomer('criacao')
+    const date = findNextOpenDate()
+
+    const appointmentId = await appointmentModule.createAppointment(
+      customerId,
+      appointmentInput(date, '09:00'),
+    )
+    const [rows] = await applicationPool.execute<AppointmentDatabaseRow[]>(
+      `SELECT id, customer_id, service_id, barber_id, appointment_date, appointment_time,
+              status, price, duration_minutes
+       FROM appointments WHERE id = ?`,
+      [appointmentId],
+    )
+
+    expect(rows[0]).toMatchObject({
+      id: appointmentId,
+      customer_id: customerId,
+      service_id: 'corte',
+      barber_id: 'guilherme',
+      appointment_date: date,
+      appointment_time: '09:00:00',
+      status: 'confirmado',
+      price: 40,
+      duration_minutes: 45,
+    })
+  })
+
+  it('permite somente um vencedor em reservas simultâneas sobrepostas', async () => {
+    const firstCustomer = await createCustomer('concorrente-a')
+    const secondCustomer = await createCustomer('concorrente-b')
+    const date = findNextOpenDate()
+
+    const results = await Promise.allSettled([
+      appointmentModule.createAppointment(firstCustomer, appointmentInput(date, '09:00')),
+      appointmentModule.createAppointment(secondCustomer, appointmentInput(date, '09:30')),
+    ])
+
+    expectSingleConflict(results)
+    const [countRows] = await applicationPool.execute<CountRow[]>(
+      `SELECT COUNT(*) AS total FROM appointments
+       WHERE barber_id = 'guilherme' AND appointment_date = ?
+         AND status IN ('confirmado', 'pendente')`,
+      [date],
+    )
+    expect(countRows[0].total).toBe(1)
+  })
+
+  it('impede o mesmo cliente de reservar dois barbeiros no mesmo período', async () => {
+    const customerId = await createCustomer('dois-barbeiros')
+    const date = findNextOpenDate()
+
+    const results = await Promise.allSettled([
+      appointmentModule.createAppointment(
+        customerId,
+        appointmentInput(date, '10:00', 'guilherme'),
+      ),
+      appointmentModule.createAppointment(customerId, appointmentInput(date, '10:00', 'vitor')),
+    ])
+
+    expectSingleConflict(results)
+    const [countRows] = await applicationPool.execute<CountRow[]>(
+      `SELECT COUNT(*) AS total FROM appointments
+       WHERE customer_id = ? AND appointment_date = ?
+         AND status IN ('confirmado', 'pendente')`,
+      [customerId, date],
+    )
+    expect(countRows[0].total).toBe(1)
+  })
+
+  it('respeita bloqueios administrativos parciais', async () => {
+    const customerId = await createCustomer('bloqueio')
+    const date = findNextOpenDate()
+    await applicationPool.execute<ResultSetHeader>(
+      `INSERT INTO schedule_blocks
+        (id, barber_id, block_date, start_time, end_time, reason, created_by)
+       VALUES (?, 'guilherme', ?, '09:15:00', '10:15:00', 'Reunião', ?)`,
+      [randomUUID(), date, staffUserId],
+    )
+
+    await expect(
+      appointmentModule.createAppointment(customerId, appointmentInput(date, '09:30')),
+    ).rejects.toMatchObject({ status: 409 })
+  })
+
+  it('limita cada cliente a cinco agendamentos futuros ativos', async () => {
+    const customerId = await createCustomer('limite')
+    const date = findNextOpenDate()
+
+    for (const time of ['09:00', '10:00', '11:00', '12:00', '13:00']) {
+      await appointmentModule.createAppointment(customerId, appointmentInput(date, time))
+    }
+
+    await expect(
+      appointmentModule.createAppointment(customerId, appointmentInput(date, '14:00')),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: 'Você pode manter no máximo 5 agendamentos futuros ativos.',
+    })
+  })
+
+  it('marca como indisponíveis todos os horários que se sobrepõem', async () => {
+    const ownerId = await createCustomer('disponibilidade-a')
+    const viewerId = await createCustomer('disponibilidade-b')
+    const date = findNextOpenDate()
+    await appointmentModule.createAppointment(ownerId, appointmentInput(date, '09:00'))
+
+    const slots = await appointmentModule.getAvailability({
+      customerId: viewerId,
+      serviceId: 'corte',
+      barberId: 'guilherme',
+      date,
+    })
+
+    expect(slots.find((slot) => slot.time === '09:00')?.available).toBe(false)
+    expect(slots.find((slot) => slot.time === '09:30')?.available).toBe(false)
+    expect(slots.find((slot) => slot.time === '10:00')?.available).toBe(true)
+  })
+
+  it('não altera uma remarcação idêntica e protege a propriedade do agendamento', async () => {
+    const ownerId = await createCustomer('proprietario')
+    const otherCustomerId = await createCustomer('terceiro')
+    const date = findNextOpenDate()
+    const input = appointmentInput(date, '11:00')
+    const appointmentId = await appointmentModule.createAppointment(ownerId, input)
+
+    await expect(
+      appointmentModule.rescheduleAppointment(ownerId, appointmentId, input),
+    ).resolves.toBe(false)
+    await expect(
+      appointmentModule.cancelAppointment(otherCustomerId, appointmentId),
+    ).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('libera o horário depois do cancelamento', async () => {
+    const firstCustomer = await createCustomer('cancelamento-a')
+    const secondCustomer = await createCustomer('cancelamento-b')
+    const date = findNextOpenDate()
+    const input = appointmentInput(date, '15:00')
+    const firstAppointment = await appointmentModule.createAppointment(firstCustomer, input)
+
+    await appointmentModule.cancelAppointment(firstCustomer, firstAppointment)
+    await expect(
+      appointmentModule.createAppointment(secondCustomer, input),
+    ).resolves.toEqual(expect.any(String))
+    await expect(
+      appointmentModule.cancelAppointment(firstCustomer, firstAppointment),
+    ).rejects.toMatchObject({ status: 409 })
+  })
+})

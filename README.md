@@ -10,6 +10,7 @@ Site, área do cliente e painel administrativo para a gestão de horários da Gu
 - Base UI e Lucide Icons
 - MySQL 8 para persistência de clientes, sessões, catálogo e agendamentos
 - Nodemailer e SMTP para e-mails transacionais
+- Vitest, React Testing Library e MySQL isolado para testes automatizados
 
 ## Como rodar o projeto localmente
 
@@ -18,7 +19,7 @@ Cada desenvolvedor terá seu próprio banco local. O banco e as senhas não são
 ### 1. Instalar os requisitos
 
 - [Git](https://git-scm.com/downloads)
-- [Node.js](https://nodejs.org/) 20.9 ou superior, com npm
+- [Node.js](https://nodejs.org/) 20.19 ou superior, com npm
 - [MySQL Community Server 8](https://dev.mysql.com/downloads/installer/)
 
 Durante a instalação do MySQL, mantenha a porta `3306`, crie uma senha para o usuário `root` e guarde essa senha. O MySQL Workbench é opcional.
@@ -153,6 +154,26 @@ O comando cria um lembrete para cada atendimento do dia seguinte, evita duplica�
 
 Em produção, configure o agendador da hospedagem para fazer uma requisição `POST` diária a `/api/notifications/process`, enviando o cabeçalho `Authorization: Bearer VALOR_DO_CRON_SECRET`. O segredo deve existir tanto no ambiente do site quanto no agendador.
 
+## Testes automatizados
+
+Com o serviço local do MySQL em execução e o `.env.local` configurado, rode toda a suíte:
+
+```powershell
+npm test
+```
+
+Para repetir os testes automaticamente durante o desenvolvimento:
+
+```powershell
+npm run test:watch
+```
+
+A suíte cobre validações, datas, templates de e-mail, limites de corpo da API, a confirmação de e-mail no navegador e as regras críticas de agendamento. Os testes de integração criam um banco temporário com o prefixo `gui_santos_barbearia_test_`, aplicam o schema real e removem esse banco ao terminar. Eles nunca reutilizam nem apagam o banco definido em `MYSQL_DATABASE` e, por segurança, só executam essa criação em um MySQL local.
+
+O usuário configurado precisa ter permissão para criar e remover o banco temporário. Se a aplicação usa uma conta restrita, defina `MYSQL_SETUP_USER` e `MYSQL_SETUP_PASSWORD` somente no ambiente local de testes. Nunca execute a suíte com credenciais de produção.
+
+No GitHub, cada push e pull request prepara uma instância isolada do MySQL 8.4 e executa schema, lint, verificação de tipos, testes e build automaticamente.
+
 ### Preparação para produção
 
 Antes de publicar o site:
@@ -193,6 +214,7 @@ Executar `npm install` e `npm run db:setup` após o `git pull` garante que novas
 ```powershell
 npm run lint
 npm run typecheck
+npm test
 npm run build
 ```
 

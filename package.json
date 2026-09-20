@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=20.19.0"
   },
   "scripts": {
     "dev": "next dev",
@@ -11,6 +11,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit --incremental false",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "db:setup": "node --env-file=.env.local scripts/setup-database.mjs",
     "admin:create": "node --env-file=.env.local scripts/create-admin.mjs",
     "notifications:process": "node --env-file=.env.local scripts/process-notifications.mjs"
@@ -37,16 +39,23 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.0",
     "@types/leaflet": "^1.9.22",
     "@types/node": "^24",
     "@types/nodemailer": "^8.0.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^5.2.0",
     "eslint": "9.39.5",
     "eslint-config-next": "16.3.4",
+    "jsdom": "^26.1.0",
     "postcss": "^8.5",
     "tailwindcss": "^4.3.3",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "vite": "^7.3.6",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^4.1.11"
   },
   "pnpm": {
     "overrides": {
