@@ -1,13 +1,22 @@
-import { NextResponse } from 'next/server'
-import type { ResultSetHeader } from 'mysql2/promise'
+import { after, NextResponse } from 'next/server'
+import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { errorResponse, internalErrorResponse, readJsonObject } from '@/lib/api'
 import {
+  createToken,
+  getCurrentCustomerSessionTokenHash,
   getAuthenticatedCustomer,
-  revokeOtherCustomerSessions,
-  verifyCustomerPassword,
+  hashToken,
+  verifyPassword,
 } from '@/lib/auth'
 import { getTodayInSaoPaulo, isValidIsoDate } from '@/lib/date'
-import { getPool } from '@/lib/db'
+import { withTransaction } from '@/lib/db'
+import {
+  canExposeDevelopmentVerificationUrl,
+  cleanupExpiredEmailVerifications,
+  createEmailVerificationUrl,
+  EMAIL_VERIFICATION_MAX_AGE_MS,
+  sendEmailVerification,
+} from '@/lib/email-verification'
 import {
   consumeRateLimits,
   getClientIdentifier,
@@ -24,6 +33,14 @@ type ProfileField =
   | 'beardStyle'
   | 'notes'
   | 'currentPassword'
+
+interface IdRow extends RowDataPacket {
+  id: string
+}
+
+interface ProfileAuthenticationRow extends RowDataPacket {
+  password_hash: string
+}
 
 function validateProfile(body: Record<string, unknown>) {
   const name = typeof body.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : ''
@@ -84,7 +101,8 @@ export async function PATCH(request: Request) {
 
   try {
     const customer = await getAuthenticatedCustomer()
-    if (!customer) return errorResponse('Faça login para continuar.', 401)
+    const sessionTokenHash = await getCurrentCustomerSessionTokenHash()
+    if (!customer || !sessionTokenHash) return errorResponse('Faça login para continuar.', 401)
     const emailChanged = data.email !== customer.email
 
     if (emailChanged) {
@@ -104,32 +122,136 @@ export async function PATCH(request: Request) {
       ])
       if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
 
-      if (!data.currentPassword || !(await verifyCustomerPassword(customer.id, data.currentPassword))) {
-        return errorResponse('Confirme sua senha atual para alterar o e-mail.', 422, {
-          currentPassword: 'A senha atual não confere.',
-        })
-      }
     }
 
-    await getPool().execute<ResultSetHeader>(
-      `UPDATE customers
-       SET name = ?, phone = ?, email = ?, birth_date = ?, preferred_cut = ?, beard_style = ?, notes = ?
-       WHERE id = ?`,
-      [
+    let verificationUrl: string | undefined
+    let tokenHash: string | undefined
+    let expiresAt: Date | undefined
+
+    if (emailChanged) {
+      const token = createToken()
+      tokenHash = hashToken(token)
+      expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_MAX_AGE_MS)
+      verificationUrl = createEmailVerificationUrl(token, request.url)
+    }
+
+    await withTransaction(async (connection) => {
+      await cleanupExpiredEmailVerifications(connection)
+      const [authenticationRows] = await connection.execute<ProfileAuthenticationRow[]>(
+        `SELECT customers.password_hash
+         FROM sessions
+         INNER JOIN customers ON customers.id = sessions.customer_id
+         WHERE sessions.token_hash = ?
+           AND sessions.customer_id = ?
+           AND sessions.expires_at > UTC_TIMESTAMP()
+         LIMIT 1
+         FOR UPDATE`,
+        [sessionTokenHash, customer.id],
+      )
+      const authentication = authenticationRows[0]
+      if (!authentication) throw new Error('CUSTOMER_SESSION_INVALID')
+
+      if (
+        emailChanged &&
+        (!data.currentPassword ||
+          !(await verifyPassword(data.currentPassword, authentication.password_hash)))
+      ) {
+        throw new Error('CUSTOMER_PASSWORD_INVALID')
+      }
+
+      if (emailChanged) {
+        const [duplicates] = await connection.execute<IdRow[]>(
+          `SELECT id
+           FROM customers
+           WHERE id <> ? AND (email = ? OR pending_email = ?)
+           LIMIT 1
+           FOR UPDATE`,
+          [customer.id, data.email, data.email],
+        )
+        if (duplicates[0]) {
+          throw new Error('CUSTOMER_EMAIL_DUPLICATE')
+        }
+      }
+
+      const profileValues = [
         data.name,
         data.phone,
-        data.email,
         data.birthDate || null,
         data.preferredCut,
         data.beardStyle,
         data.notes,
-        customer.id,
-      ],
-    )
-    if (emailChanged) await revokeOtherCustomerSessions(customer.id)
+      ]
+      if (emailChanged) {
+        await connection.execute<ResultSetHeader>(
+          `UPDATE customers
+           SET name = ?, phone = ?, birth_date = ?, preferred_cut = ?, beard_style = ?, notes = ?,
+               pending_email = ?
+           WHERE id = ?`,
+          [...profileValues, data.email, customer.id],
+        )
+      } else {
+        await connection.execute<ResultSetHeader>(
+          `UPDATE customers
+           SET name = ?, phone = ?, birth_date = ?, preferred_cut = ?, beard_style = ?, notes = ?
+           WHERE id = ?`,
+          [...profileValues, customer.id],
+        )
+      }
 
-    return NextResponse.json({ message: 'Perfil atualizado com sucesso.' })
+      if (emailChanged && tokenHash && expiresAt) {
+        await connection.execute<ResultSetHeader>(
+          `DELETE FROM email_verification_tokens
+           WHERE customer_id = ? AND purpose = 'email_change'`,
+          [customer.id],
+        )
+        await connection.execute<ResultSetHeader>(
+          `INSERT INTO email_verification_tokens
+            (token_hash, customer_id, email, purpose, expires_at)
+           VALUES (?, ?, ?, 'email_change', ?)`,
+          [tokenHash, customer.id, data.email, expiresAt],
+        )
+      }
+    })
+
+    if (emailChanged && verificationUrl) {
+      after(async () => {
+        try {
+          await sendEmailVerification({
+            customerName: data.name,
+            email: data.email,
+            verificationUrl,
+            purpose: 'email_change',
+          })
+        } catch (error) {
+          console.error('Falha ao enviar confirmação do novo e-mail:', error)
+        }
+      })
+    }
+
+    return NextResponse.json({
+      message: emailChanged
+        ? 'Perfil atualizado. Confirme o novo endereço pelo link enviado por e-mail.'
+        : 'Perfil atualizado com sucesso.',
+      emailVerificationRequired: emailChanged,
+      developmentVerificationUrl:
+        emailChanged && verificationUrl && canExposeDevelopmentVerificationUrl(request.url)
+          ? verificationUrl
+          : undefined,
+    })
   } catch (error) {
+    if (error instanceof Error && error.message === 'CUSTOMER_SESSION_INVALID') {
+      return errorResponse('Sua sessão expirou. Entre novamente para continuar.', 401)
+    }
+    if (error instanceof Error && error.message === 'CUSTOMER_PASSWORD_INVALID') {
+      return errorResponse('Confirme sua senha atual para alterar o e-mail.', 422, {
+        currentPassword: 'A senha atual não confere.',
+      })
+    }
+    if (error instanceof Error && error.message === 'CUSTOMER_EMAIL_DUPLICATE') {
+      return errorResponse('Já existe uma conta com este e-mail.', 409, {
+        email: 'Este e-mail já está sendo usado por outra conta.',
+      })
+    }
     if (isDuplicateEntry(error)) {
       return errorResponse('Já existe uma conta com este e-mail.', 409, {
         email: 'Este e-mail já está sendo usado por outra conta.',

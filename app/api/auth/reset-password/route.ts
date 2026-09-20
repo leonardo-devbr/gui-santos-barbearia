@@ -72,12 +72,16 @@ export async function POST(request: Request) {
       if (!resetToken) return false
 
       await connection.execute<ResultSetHeader>(
-        'UPDATE customers SET password_hash = ? WHERE id = ?',
+        'UPDATE customers SET password_hash = ?, pending_email = NULL WHERE id = ?',
         [passwordHash, resetToken.customer_id],
       )
       await connection.execute<ResultSetHeader>('DELETE FROM password_reset_tokens WHERE customer_id = ?', [
         resetToken.customer_id,
       ])
+      await connection.execute<ResultSetHeader>(
+        'DELETE FROM email_verification_tokens WHERE customer_id = ?',
+        [resetToken.customer_id],
+      )
       await connection.execute<ResultSetHeader>('DELETE FROM sessions WHERE customer_id = ?', [
         resetToken.customer_id,
       ])

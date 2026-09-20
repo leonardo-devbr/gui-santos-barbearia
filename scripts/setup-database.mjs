@@ -124,6 +124,80 @@ async function hasAppointmentIndex(name) {
   return Boolean(rows[0])
 }
 
+async function hasCustomerColumn(name) {
+  const [rows] = await databaseConnection.execute(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'customers' AND column_name = ?
+     LIMIT 1`,
+    [name],
+  )
+  return Boolean(rows[0])
+}
+
+async function hasCustomerIndex(name) {
+  const [rows] = await databaseConnection.execute(
+    `SELECT 1
+     FROM information_schema.statistics
+     WHERE table_schema = DATABASE() AND table_name = 'customers' AND index_name = ?
+     LIMIT 1`,
+    [name],
+  )
+  return Boolean(rows[0])
+}
+
+async function hasSchemaMigration(name) {
+  const [rows] = await databaseConnection.execute(
+    'SELECT 1 FROM schema_migrations WHERE name = ? LIMIT 1',
+    [name],
+  )
+  return Boolean(rows[0])
+}
+
+async function migrateCustomerEmailVerification() {
+  if (!(await hasCustomerColumn('email_verified_at'))) {
+    await databaseConnection.query(
+      'ALTER TABLE customers ADD COLUMN email_verified_at DATETIME NULL AFTER email',
+    )
+  }
+
+  if (!(await hasCustomerColumn('pending_email'))) {
+    await databaseConnection.query(
+      'ALTER TABLE customers ADD COLUMN pending_email VARCHAR(254) NULL AFTER email_verified_at',
+    )
+  }
+
+  if (!(await hasCustomerIndex('customers_pending_email_unique'))) {
+    await databaseConnection.query(
+      'ALTER TABLE customers ADD UNIQUE INDEX customers_pending_email_unique (pending_email)',
+    )
+  }
+
+  if (!(await hasCustomerIndex('customers_email_verification_cleanup_index'))) {
+    await databaseConnection.query(
+      `ALTER TABLE customers
+       ADD INDEX customers_email_verification_cleanup_index (email_verified_at, created_at)`,
+    )
+  }
+
+  const migrationName = '20260918_customer_email_verification'
+  if (!(await hasSchemaMigration(migrationName))) {
+    await databaseConnection.beginTransaction()
+    try {
+      await databaseConnection.query(
+        'UPDATE customers SET email_verified_at = UTC_TIMESTAMP() WHERE email_verified_at IS NULL',
+      )
+      await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+        migrationName,
+      ])
+      await databaseConnection.commit()
+    } catch (error) {
+      await databaseConnection.rollback()
+      throw error
+    }
+  }
+}
+
 async function migrateLegacyAppointments() {
   if (!(await hasAppointmentColumn('active_slot'))) {
     await databaseConnection.query(
@@ -151,6 +225,7 @@ async function migrateLegacyAppointments() {
 
 try {
   await databaseConnection.query(schema)
+  await migrateCustomerEmailVerification()
   await migrateLegacyAppointments()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {

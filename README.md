@@ -164,7 +164,7 @@ Antes de publicar o site:
 - configure SMTP com TLS, um remetente do domínio e credenciais exclusivas da aplicação;
 - configure `TRUSTED_PROXY_IP_HEADER` com o cabeçalho de IP garantido pela hospedagem (`cf-connecting-ip`, `x-real-ip` ou `x-forwarded-for`); nunca confie em um cabeçalho que chega diretamente da internet;
 - gere um `CRON_SECRET` longo e diferente das demais senhas;
-- mantenha `DEV_EXPOSE_PASSWORD_RESET_URL=false` e remova `ADMIN_PASSWORD`, `MYSQL_SETUP_USER` e `MYSQL_SETUP_PASSWORD` depois das tarefas de configuração.
+- mantenha `DEV_EXPOSE_PASSWORD_RESET_URL=false` e `DEV_EXPOSE_EMAIL_VERIFICATION_URL=false`, e remova `ADMIN_PASSWORD`, `MYSQL_SETUP_USER` e `MYSQL_SETUP_PASSWORD` depois das tarefas de configuração.
 
 Em produção, `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD` e `MYSQL_DATABASE` devem ser definidos explicitamente, a senha não pode ficar vazia e `MYSQL_USER` não pode ser `root`. A aplicação recusa uma conexão remota sem TLS; bancos locais em `localhost` ou `127.0.0.1` continuam funcionando com `MYSQL_SSL=false` durante o desenvolvimento.
 
@@ -200,9 +200,9 @@ npm run build
 
 O backend usa Route Handlers do Next.js e MySQL. Cadastro, login, logout, perfil, catálogo, disponibilidade, criação, remarcação, cancelamento e histórico de agendamentos estão conectados ao banco. O painel administrativo também usa o MySQL para autenticação da equipe, indicadores, agenda diária, bloqueios, catálogo, equipe e configurações do estabelecimento.
 
-As senhas usam derivação `scrypt` e novas senhas exigem ao menos 12 caracteres, uma letra e um número. Sessões e tokens de recuperação ficam no MySQL, enquanto o navegador recebe apenas um cookie de sessão `HttpOnly`, `SameSite=Lax` e seguro em produção. Sessões antigas são limitadas e rotacionadas durante novos logins. A confirmação de um horário ocorre dentro de uma transação que bloqueia os recursos necessários e verifica novamente qualquer sobreposição.
+As senhas usam derivação `scrypt` e novas senhas exigem ao menos 12 caracteres, uma letra e um número. Uma conta só pode entrar depois de comprovar a posse do e-mail. Sessões e tokens de recuperação ou confirmação ficam no MySQL somente como hashes, enquanto o navegador recebe apenas um cookie de sessão `HttpOnly`, `SameSite=Lax` e seguro em produção. Sessões antigas são limitadas e rotacionadas durante novos logins. A confirmação de um horário ocorre dentro de uma transação que bloqueia os recursos necessários e verifica novamente qualquer sobreposição.
 
-Recuperação de senha, confirmação, remarcação, cancelamento e lembrete de agendamento possuem e-mails próprios. Sem SMTP, o desenvolvimento mostra uma prévia no terminal. O link de recuperação só aparece diretamente na tela quando `DEV_EXPOSE_PASSWORD_RESET_URL=true`, a origem é local e o ambiente não é de produção. Em produção, `APP_URL` com HTTPS e as credenciais SMTP são obrigatórios para a entrega real.
+Recuperação de senha, verificação de endereço, confirmação, remarcação, cancelamento e lembrete de agendamento possuem e-mails próprios. Sem SMTP, o desenvolvimento mostra uma prévia no terminal. Links só aparecem diretamente na tela local com as opções explícitas `DEV_EXPOSE_PASSWORD_RESET_URL` ou `DEV_EXPOSE_EMAIL_VERIFICATION_URL`; isso nunca ocorre em produção. Em produção, `APP_URL` com HTTPS e as credenciais SMTP são obrigatórios para a entrega real.
 
 As notificações de agendamento são registradas em uma fila no MySQL. Uma indisponibilidade do provedor de e-mail não desfaz o agendamento: a mensagem fica marcada como falha e o processador pode tentar novamente até três vezes.
 
@@ -227,13 +227,14 @@ Todas as requisições e respostas usam JSON. Em erros, a API responde com um st
 
 | Método | Rota | Corpo | Comportamento |
 | --- | --- | --- | --- |
-| `POST` | `/api/auth/register` | `{ "name", "phone", "email", "password" }` | Cria a conta; e-mail deve ser único. |
+| `POST` | `/api/auth/register` | `{ "name", "phone", "email", "password" }` | Inicia o cadastro e envia um link de confirmação sem revelar se o e-mail já está em uso. |
 | `POST` | `/api/auth/login` | `{ "email", "password" }` | Cria a sessão e envia um cookie seguro e `HttpOnly`. |
 | `POST` | `/api/auth/logout` | Sem corpo | Invalida a sessão e remove o cookie. |
 | `POST` | `/api/auth/forgot-password` | `{ "email" }` | Cria um token sem revelar se o e-mail existe; só devolve o link local com a opção explícita de desenvolvimento. |
 | `POST` | `/api/auth/reset-password` | `{ "token", "password" }` | Consome um token válido e altera a senha. |
+| `POST` | `/api/auth/verify-email` | `{ "token" }` | Ativa um cadastro ou confirma a troca de e-mail. |
 
-O link de recuperação aponta para `/redefinir-senha?token=TOKEN`. O token é aleatório, armazenado somente como hash, expira em uma hora e é invalidado após o uso.
+O link de recuperação aponta para `/redefinir-senha?token=TOKEN`, expira em uma hora e é invalidado após o uso. A confirmação de e-mail aponta para `/verificar-email?token=TOKEN` e expira em 24 horas. Ambos os tokens são aleatórios e armazenados somente como hash.
 
 ### Agendamentos
 
@@ -316,7 +317,7 @@ Serviços e barbeiros são desativados, não apagados, preservando o histórico 
 ```
 
 Essa rota exige autenticação e só pode alterar o perfil vinculado à sessão atual.
-Ao trocar o e-mail, envie também `currentPassword`; as demais sessões do cliente são revogadas depois da alteração.
+Ao solicitar a troca do e-mail, envie também `currentPassword`. O endereço atual permanece válido até a confirmação do novo endereço; depois da confirmação, todas as sessões são revogadas e o cliente precisa entrar novamente.
 
 ### Leituras
 

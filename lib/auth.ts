@@ -4,7 +4,7 @@ import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } fr
 import { promisify } from 'node:util'
 import { cookies } from 'next/headers'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
-import { getPool } from '@/lib/db'
+import { getPool, withTransaction } from '@/lib/db'
 import type { CustomerProfile } from '@/lib/types'
 
 const scrypt = promisify(scryptCallback)
@@ -13,6 +13,8 @@ const SESSION_COOKIE_NAME =
   process.env.NODE_ENV === 'production' ? '__Host-gui_santos_session' : LEGACY_SESSION_COOKIE_NAME
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 const PASSWORD_KEY_LENGTH = 64
+const DUMMY_PASSWORD_HASH =
+  'scrypt$6f9c8f460f4ef207d0f9247cd41b278a$0fc89881f74eb107e9ec634f863fe5e385e8ab4a9a7122b75eb0edd877acdeac17245f5ea57b8d7f9bc5b31e645d79f86ea4f1e599a6163f4e5953343b0a1be3'
 
 interface CustomerRow extends RowDataPacket {
   id: string
@@ -27,8 +29,10 @@ interface CustomerRow extends RowDataPacket {
   loyalty_points: number
 }
 
-interface PasswordRow extends RowDataPacket {
+interface LoginCredentialRow extends RowDataPacket {
+  id: string
   password_hash: string
+  email_verified_at: string | null
 }
 
 function mapCustomer(row: CustomerRow): CustomerProfile {
@@ -54,6 +58,11 @@ export function hashToken(token: string) {
   return createHash('sha256').update(token).digest('hex')
 }
 
+export async function getCurrentCustomerSessionTokenHash() {
+  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value
+  return token ? hashToken(token) : null
+}
+
 export async function hashPassword(password: string) {
   const salt = randomBytes(16).toString('hex')
   const derivedKey = (await scrypt(password, salt, PASSWORD_KEY_LENGTH)) as Buffer
@@ -74,38 +83,61 @@ export async function verifyPassword(password: string, storedHash: string) {
   }
 }
 
-export async function createSession(customerId: string) {
+export async function authenticateCustomer(email: string, password: string) {
+  const cookieStore = await cookies()
+  const previousToken = cookieStore.get(SESSION_COOKIE_NAME)?.value
   const token = createToken()
   const tokenHash = hashToken(token)
   const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000)
-  const pool = getPool()
+  const result = await withTransaction<'invalid' | 'unverified' | 'authenticated'>(
+    async (connection) => {
+      const [rows] = await connection.execute<LoginCredentialRow[]>(
+        `SELECT id, password_hash, email_verified_at
+         FROM customers
+         WHERE email = ?
+         LIMIT 1
+         FOR UPDATE`,
+        [email],
+      )
+      const customer = rows[0]
+      const passwordMatches = await verifyPassword(
+        password,
+        customer?.password_hash ?? DUMMY_PASSWORD_HASH,
+      )
 
-  const cookieStore = await cookies()
-  const previousToken = cookieStore.get(SESSION_COOKIE_NAME)?.value
+      if (!customer || !passwordMatches) return 'invalid'
+      if (!customer.email_verified_at) return 'unverified'
 
-  await pool.execute('DELETE FROM sessions WHERE expires_at <= UTC_TIMESTAMP()')
-  if (previousToken) {
-    await pool.execute('DELETE FROM sessions WHERE token_hash = ?', [hashToken(previousToken)])
-  }
-  await pool.execute(
-    'INSERT INTO sessions (token_hash, customer_id, expires_at) VALUES (?, ?, ?)',
-    [tokenHash, customerId, expiresAt],
+      await connection.execute('DELETE FROM sessions WHERE expires_at <= UTC_TIMESTAMP()')
+      if (previousToken) {
+        await connection.execute('DELETE FROM sessions WHERE token_hash = ?', [
+          hashToken(previousToken),
+        ])
+      }
+      await connection.execute(
+        'INSERT INTO sessions (token_hash, customer_id, expires_at) VALUES (?, ?, ?)',
+        [tokenHash, customer.id, expiresAt],
+      )
+      await connection.execute(
+        `DELETE FROM sessions
+         WHERE customer_id = ?
+           AND token_hash <> ?
+           AND token_hash NOT IN (
+             SELECT token_hash FROM (
+               SELECT token_hash
+               FROM sessions
+               WHERE customer_id = ? AND token_hash <> ?
+               ORDER BY created_at DESC, token_hash DESC
+               LIMIT 4
+             ) AS recent_sessions
+           )`,
+        [customer.id, tokenHash, customer.id, tokenHash],
+      )
+      return 'authenticated'
+    },
   )
-  await pool.execute(
-    `DELETE FROM sessions
-     WHERE customer_id = ?
-       AND token_hash <> ?
-       AND token_hash NOT IN (
-         SELECT token_hash FROM (
-           SELECT token_hash
-           FROM sessions
-           WHERE customer_id = ? AND token_hash <> ?
-           ORDER BY created_at DESC, token_hash DESC
-           LIMIT 4
-         ) AS recent_sessions
-       )`,
-    [customerId, tokenHash, customerId, tokenHash],
-  )
+
+  if (result !== 'authenticated') return result
 
   cookieStore.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
@@ -118,6 +150,7 @@ export async function createSession(customerId: string) {
   if (SESSION_COOKIE_NAME !== LEGACY_SESSION_COOKIE_NAME) {
     cookieStore.delete(LEGACY_SESSION_COOKIE_NAME)
   }
+  return result
 }
 
 export async function destroySession() {
@@ -132,14 +165,6 @@ export async function destroySession() {
   if (SESSION_COOKIE_NAME !== LEGACY_SESSION_COOKIE_NAME) {
     cookieStore.delete(LEGACY_SESSION_COOKIE_NAME)
   }
-}
-
-export async function verifyCustomerPassword(customerId: string, password: string) {
-  const [rows] = await getPool().execute<PasswordRow[]>(
-    'SELECT password_hash FROM customers WHERE id = ? LIMIT 1',
-    [customerId],
-  )
-  return rows[0] ? verifyPassword(password, rows[0].password_hash) : false
 }
 
 export async function revokeOtherCustomerSessions(customerId: string) {

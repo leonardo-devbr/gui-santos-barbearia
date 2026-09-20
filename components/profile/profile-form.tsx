@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { LoaderCircle } from 'lucide-react'
 import { toast } from 'sonner'
@@ -28,6 +29,8 @@ type ProfileErrors = Partial<Record<ProfileField, string>>
 interface ProfileResponse {
   message?: string
   errors?: ProfileErrors
+  emailVerificationRequired?: boolean
+  developmentVerificationUrl?: string
 }
 
 export function ProfileForm({ customer }: { customer: CustomerProfile }) {
@@ -45,6 +48,7 @@ export function ProfileForm({ customer }: { customer: CustomerProfile }) {
   const [errors, setErrors] = useState<ProfileErrors>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [developmentVerificationUrl, setDevelopmentVerificationUrl] = useState<string | null>(null)
 
   function update(field: keyof typeof form, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -122,10 +126,15 @@ export function ProfileForm({ customer }: { customer: CustomerProfile }) {
         return
       }
 
-      toast.success('Perfil atualizado', {
-        description: 'Suas informações foram salvas com sucesso.',
+      toast.success(result?.emailVerificationRequired ? 'Confirme seu novo e-mail' : 'Perfil atualizado', {
+        description: result?.message ?? 'Suas informações foram salvas com sucesso.',
       })
-      setForm((current) => ({ ...current, currentPassword: '' }))
+      setDevelopmentVerificationUrl(result?.developmentVerificationUrl ?? null)
+      setForm((current) => ({
+        ...current,
+        email: result?.emailVerificationRequired ? customer.email : current.email,
+        currentPassword: '',
+      }))
       router.refresh()
     } catch {
       setSubmitError('Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.')
@@ -292,6 +301,17 @@ export function ProfileForm({ customer }: { customer: CustomerProfile }) {
         <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {submitError}
         </p>
+      )}
+
+      {developmentVerificationUrl && (
+        <Button
+          render={<Link href={developmentVerificationUrl} />}
+          nativeButton={false}
+          variant="outline"
+          className="self-end"
+        >
+          Abrir confirmação de desenvolvimento
+        </Button>
       )}
 
       <div className="flex justify-end">

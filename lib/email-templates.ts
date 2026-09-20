@@ -91,6 +91,37 @@ export function createPasswordResetEmail({
   return { subject, text, html }
 }
 
+export function createEmailVerificationEmail({
+  customerName,
+  verificationUrl,
+  businessName,
+  purpose,
+}: {
+  customerName: string
+  verificationUrl: string
+  businessName: string
+  purpose: 'registration' | 'email_change'
+}): EmailTemplate {
+  const firstName = customerName.trim().split(/\s+/)[0] || 'cliente'
+  const isRegistration = purpose === 'registration'
+  const subject = `${isRegistration ? 'Confirme seu cadastro' : 'Confirme seu novo e-mail'} | ${businessName}`
+  const instruction = isRegistration
+    ? 'confirmar seu endereço e ativar a conta'
+    : 'confirmar o novo endereço e concluir a alteração'
+  const text = `Olá, ${firstName}. Use o link abaixo para ${instruction}. Ele expira em 24 horas:\n\n${verificationUrl}\n\nSe você não reconhece esta solicitação, ignore esta mensagem.`
+  const html = renderEmail({
+    title: isRegistration ? 'Confirme seu cadastro' : 'Confirme seu novo e-mail',
+    intro: `Olá, ${firstName}. Falta apenas confirmar que este endereço de e-mail pertence a você.`,
+    content:
+      '<p style="margin:0;color:#c7c7c7;line-height:1.6">O botão abaixo é válido por 24 horas e pode ser usado somente uma vez.</p>',
+    actionLabel: 'Confirmar e-mail',
+    actionUrl: verificationUrl,
+    businessName,
+  })
+
+  return { subject, text, html }
+}
+
 export function createAppointmentEmail(
   type: AppointmentEmailType,
   details: AppointmentEmailDetails,

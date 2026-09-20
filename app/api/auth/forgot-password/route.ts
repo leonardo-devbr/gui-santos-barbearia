@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { after, NextResponse } from 'next/server'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { createToken, hashToken } from '@/lib/auth'
 import { errorResponse, internalErrorResponse, readJsonObject } from '@/lib/api'
@@ -66,55 +66,57 @@ export async function POST(request: Request) {
     ])
     if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
 
-    const pool = getPool()
-    const [rows] = await pool.execute<CustomerIdRow[]>(
-      'SELECT id, name, email FROM customers WHERE email = ? LIMIT 1',
-      [email],
-    )
-    const customer = rows[0]
+    const token = createToken()
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
+
+    const customer = await withTransaction<CustomerIdRow | null>(async (connection) => {
+      const [rows] = await connection.execute<CustomerIdRow[]>(
+        `SELECT id, name, email
+         FROM customers
+         WHERE email = ? AND email_verified_at IS NOT NULL
+         LIMIT 1
+         FOR UPDATE`,
+        [email],
+      )
+      const currentCustomer = rows[0]
+      if (!currentCustomer) return null
+
+      await connection.execute<ResultSetHeader>(
+        'DELETE FROM password_reset_tokens WHERE customer_id = ? OR expires_at <= UTC_TIMESTAMP()',
+        [currentCustomer.id],
+      )
+      await connection.execute<ResultSetHeader>(
+        'INSERT INTO password_reset_tokens (token_hash, customer_id, expires_at) VALUES (?, ?, ?)',
+        [hashToken(token), currentCustomer.id, expiresAt],
+      )
+      return currentCustomer
+    })
 
     if (!customer) {
       await waitForMinimumResponseTime(startedAt)
       return NextResponse.json({ message: successMessage })
     }
 
-    const token = createToken()
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
+    const resetUrl = `${getPublicAppUrl(request.url)}/redefinir-senha?token=${encodeURIComponent(token)}`
+    const developmentResetUrl = canExposeDevelopmentResetUrl(request) ? resetUrl : undefined
 
-    await withTransaction(async (connection) => {
-      await connection.execute<CustomerIdRow[]>(
-        'SELECT id, name, email FROM customers WHERE id = ? LIMIT 1 FOR UPDATE',
-        [customer.id],
-      )
-      await connection.execute<ResultSetHeader>(
-        'DELETE FROM password_reset_tokens WHERE customer_id = ? OR expires_at <= UTC_TIMESTAMP()',
-        [customer.id],
-      )
-      await connection.execute<ResultSetHeader>(
-        'INSERT INTO password_reset_tokens (token_hash, customer_id, expires_at) VALUES (?, ?, ?)',
-        [hashToken(token), customer.id, expiresAt],
-      )
+    after(async () => {
+      try {
+        const { settings } = await getBusinessConfiguration()
+        const emailMessage = createPasswordResetEmail({
+          customerName: customer.name,
+          resetUrl,
+          businessName: settings.name,
+        })
+        await sendEmail({ to: customer.email, ...emailMessage })
+      } catch (error) {
+        console.error('Falha ao enviar e-mail de recuperação:', error)
+        await getPool().execute<ResultSetHeader>(
+          'DELETE FROM password_reset_tokens WHERE token_hash = ?',
+          [hashToken(token)],
+        )
+      }
     })
-
-    let developmentResetUrl: string | undefined
-
-    try {
-      const resetUrl = `${getPublicAppUrl(request.url)}/redefinir-senha?token=${encodeURIComponent(token)}`
-      const { settings } = await getBusinessConfiguration()
-      const emailMessage = createPasswordResetEmail({
-        customerName: customer.name,
-        resetUrl,
-        businessName: settings.name,
-      })
-      await sendEmail({ to: customer.email, ...emailMessage })
-      developmentResetUrl = canExposeDevelopmentResetUrl(request) ? resetUrl : undefined
-    } catch (error) {
-      console.error('Falha ao enviar e-mail de recuperação:', error)
-      await pool.execute<ResultSetHeader>(
-        'DELETE FROM password_reset_tokens WHERE token_hash = ?',
-        [hashToken(token)],
-      )
-    }
 
     await waitForMinimumResponseTime(startedAt)
     return NextResponse.json({ message: successMessage, developmentResetUrl })

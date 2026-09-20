@@ -1,8 +1,16 @@
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  name VARCHAR(100) NOT NULL,
+  applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS customers (
   id CHAR(36) NOT NULL,
   name VARCHAR(80) NOT NULL,
   phone VARCHAR(11) NOT NULL,
   email VARCHAR(254) NOT NULL,
+  email_verified_at DATETIME NULL,
+  pending_email VARCHAR(254) NULL,
   password_hash VARCHAR(255) NOT NULL,
   birth_date DATE NULL,
   photo_url VARCHAR(512) NOT NULL DEFAULT '/placeholder-user.jpg',
@@ -13,7 +21,9 @@ CREATE TABLE IF NOT EXISTS customers (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY customers_email_unique (email)
+  UNIQUE KEY customers_email_unique (email),
+  UNIQUE KEY customers_pending_email_unique (pending_email),
+  KEY customers_email_verification_cleanup_index (email_verified_at, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS services (
@@ -128,6 +138,20 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
   KEY password_reset_customer_id_index (customer_id),
   KEY password_reset_expires_at_index (expires_at),
   CONSTRAINT password_reset_customer_id_fk
+    FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS email_verification_tokens (
+  token_hash CHAR(64) NOT NULL,
+  customer_id CHAR(36) NOT NULL,
+  email VARCHAR(254) NOT NULL,
+  purpose ENUM('registration', 'email_change') NOT NULL,
+  expires_at DATETIME NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (token_hash),
+  UNIQUE KEY email_verification_customer_purpose_unique (customer_id, purpose),
+  KEY email_verification_expiry_index (expires_at),
+  CONSTRAINT email_verification_customer_id_fk
     FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 

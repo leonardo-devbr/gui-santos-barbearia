@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server'
-import type { RowDataPacket } from 'mysql2/promise'
 import { errorResponse, internalErrorResponse, readJsonObject } from '@/lib/api'
-import { createSession, verifyPassword } from '@/lib/auth'
-import { getPool } from '@/lib/db'
+import { authenticateCustomer } from '@/lib/auth'
 import {
   consumeRateLimits,
   getClientIdentifier,
@@ -10,14 +8,6 @@ import {
   resetRateLimit,
 } from '@/lib/rate-limit'
 import { isValidEmail, MAX_PASSWORD_LENGTH, normalizeEmail } from '@/lib/validation'
-
-interface LoginRow extends RowDataPacket {
-  id: string
-  password_hash: string
-}
-
-const dummyPasswordHash =
-  'scrypt$6f9c8f460f4ef207d0f9247cd41b278a$0fc89881f74eb107e9ec634f863fe5e385e8ab4a9a7122b75eb0edd877acdeac17245f5ea57b8d7f9bc5b31e645d79f86ea4f1e599a6163f4e5953343b0a1be3'
 
 export async function POST(request: Request) {
   const body = await readJsonObject(request)
@@ -52,18 +42,14 @@ export async function POST(request: Request) {
     ])
     if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
 
-    const [rows] = await getPool().execute<LoginRow[]>(
-      'SELECT id, password_hash FROM customers WHERE email = ? LIMIT 1',
-      [email],
-    )
-    const customer = rows[0]
-    const passwordMatches = await verifyPassword(password, customer?.password_hash ?? dummyPasswordHash)
-
-    if (!customer || !passwordMatches) {
+    const authentication = await authenticateCustomer(email, password)
+    if (authentication === 'invalid') {
       return errorResponse('E-mail ou senha incorretos.', 401)
     }
+    if (authentication === 'unverified') {
+      return errorResponse('Confirme seu e-mail antes de entrar.', 403)
+    }
 
-    await createSession(customer.id)
     await resetRateLimit('customer-login-email', email)
     return NextResponse.json({ message: 'Login realizado com sucesso.' })
   } catch (error) {
