@@ -2,6 +2,7 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
+import { MAX_BOOKING_DAYS_AHEAD } from '@/lib/booking-calendar'
 import { addDaysToIsoDate, getNowInSaoPaulo, isValidIsoDate, isValidTime } from '@/lib/date'
 import { getPool, withTransaction } from '@/lib/db'
 import type { Appointment, AppointmentStatus, TimeSlot } from '@/lib/types'
@@ -58,7 +59,6 @@ interface OwnedAppointmentRow extends RowDataPacket {
   appointment_time: string
 }
 
-const MAX_BOOKING_DAYS_AHEAD = 90
 const MAX_ACTIVE_APPOINTMENTS = 5
 
 export interface AppointmentInput {

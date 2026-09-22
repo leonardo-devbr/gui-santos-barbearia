@@ -2,44 +2,35 @@
 
 import { useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, ChevronLeft, CalendarDays, Clock, LoaderCircle, Scissors, User } from 'lucide-react'
+import {
+  CalendarDays,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  LoaderCircle,
+  Scissors,
+  User,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ServiceCard } from '@/components/service-card'
 import { BarberCard } from '@/components/barber-card'
+import { getBookableDays } from '@/lib/booking-calendar'
 import { cn } from '@/lib/utils'
 import { formatDateLong, formatPrice } from '@/lib/format'
-import type { Barber, Service, TimeSlot } from '@/lib/types'
+import type { Barber, BusinessHour, Service, TimeSlot } from '@/lib/types'
 
 const steps = ['Serviço', 'Barbeiro', 'Data', 'Horário', 'Confirmar'] as const
 
-// Gera os próximos dias úteis (terça a sábado) a partir de hoje.
-function getNextDays(count: number) {
-  const days: { iso: string; weekday: string; day: string; month: string }[] = []
-  const date = new Date()
-  const weekdays = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb']
-  const months = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
-  while (days.length < count) {
-    date.setDate(date.getDate() + 1)
-    const dow = date.getDay()
-    if (dow === 0 || dow === 1) continue // fechado domingo e segunda
-    const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
-      date.getDate(),
-    ).padStart(2, '0')}`
-    days.push({
-      iso,
-      weekday: weekdays[dow],
-      day: String(date.getDate()).padStart(2, '0'),
-      month: months[date.getMonth()],
-    })
-  }
-  return days
-}
+const DATES_PER_PAGE = 12
 
 interface BookingFlowProps {
   services: Service[]
   barbers: Barber[]
+  businessHours: BusinessHour[]
+  today: string
   appointmentId?: string
   initialServiceId?: string
   initialBarberId?: string
@@ -68,12 +59,17 @@ function isTimeSlot(value: unknown): value is TimeSlot {
 export function BookingFlow({
   services,
   barbers,
+  businessHours,
+  today,
   appointmentId,
   initialServiceId,
   initialBarberId,
 }: BookingFlowProps) {
   const router = useRouter()
-  const days = useMemo(() => getNextDays(12), [])
+  const days = useMemo(
+    () => getBookableDays(today, businessHours),
+    [businessHours, today],
+  )
   const isRescheduling = Boolean(appointmentId)
   const validInitialServiceId = initialServiceId && services.some((service) => service.id === initialServiceId)
     ? initialServiceId
@@ -83,6 +79,7 @@ export function BookingFlow({
     : undefined
 
   const [step, setStep] = useState(0)
+  const [datePage, setDatePage] = useState(0)
   const [serviceId, setServiceId] = useState<string | undefined>(validInitialServiceId)
   const [barberId, setBarberId] = useState<string | undefined>(validInitialBarberId)
   const [date, setDate] = useState<string | undefined>()
@@ -96,6 +93,10 @@ export function BookingFlow({
 
   const service = serviceId ? services.find((item) => item.id === serviceId) : undefined
   const barber = barberId ? barbers.find((item) => item.id === barberId) : undefined
+  const pageStart = datePage * DATES_PER_PAGE
+  const visibleDays = days.slice(pageStart, pageStart + DATES_PER_PAGE)
+  const hasPreviousDates = datePage > 0
+  const hasNextDates = pageStart + DATES_PER_PAGE < days.length
 
   const canAdvance =
     (step === 0 && Boolean(serviceId)) ||
@@ -297,26 +298,67 @@ export function BookingFlow({
         {step === 2 && (
           <>
             <h2 className="font-serif text-2xl text-foreground">Escolha a data</h2>
-            <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-              {days.map((d) => (
-                <button
-                  key={d.iso}
-                  type="button"
-                  aria-pressed={date === d.iso}
-                  onClick={() => selectDate(d.iso)}
-                  className={cn(
-                    'flex flex-col items-center gap-1 rounded-xl border p-3 transition-colors',
-                    date === d.iso
-                      ? 'border-primary bg-primary/10 text-foreground'
-                      : 'border-border bg-card text-muted-foreground hover:border-primary/50',
-                  )}
-                >
-                  <span className="text-xs uppercase tracking-wide">{d.weekday}</span>
-                  <span className="font-serif text-xl text-foreground">{d.day}</span>
-                  <span className="text-xs uppercase">{d.month}</span>
-                </button>
-              ))}
-            </div>
+            {days.length === 0 ? (
+              <div className="flex min-h-32 items-center justify-center rounded-xl border border-border bg-card p-5 text-center text-sm text-muted-foreground">
+                Não há dias de atendimento disponíveis nos próximos 90 dias.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+                  {visibleDays.map((d) => (
+                    <button
+                      key={d.iso}
+                      type="button"
+                      aria-pressed={date === d.iso}
+                      onClick={() => selectDate(d.iso)}
+                      className={cn(
+                        'flex flex-col items-center gap-1 rounded-xl border p-3 transition-colors',
+                        date === d.iso
+                          ? 'border-primary bg-primary/10 text-foreground'
+                          : 'border-border bg-card text-muted-foreground hover:border-primary/50',
+                      )}
+                    >
+                      <span className="text-xs uppercase tracking-wide">
+                        {d.iso === today ? 'hoje' : d.weekday}
+                      </span>
+                      <span className="font-serif text-xl text-foreground">{d.day}</span>
+                      <span className="text-xs uppercase">{d.month}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {days.length > DATES_PER_PAGE && (
+                  <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
+                    <p className="text-xs text-muted-foreground" aria-live="polite">
+                      Mostrando {pageStart + 1}–{Math.min(pageStart + DATES_PER_PAGE, days.length)} de{' '}
+                      {days.length} datas disponíveis
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={!hasPreviousDates}
+                        onClick={() => setDatePage((current) => current - 1)}
+                      >
+                        <ChevronLeft aria-hidden="true" />
+                        Datas anteriores
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={!hasNextDates}
+                        onClick={() => setDatePage((current) => current + 1)}
+                      >
+                        Próximas datas
+                        <ChevronRight aria-hidden="true" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </>
         )}
 
@@ -335,7 +377,7 @@ export function BookingFlow({
                   Tentar novamente
                 </Button>
               </div>
-            ) : timeSlots.length === 0 ? (
+            ) : !timeSlots.some((slot) => slot.available) ? (
               <div className="flex min-h-32 items-center justify-center rounded-xl border border-border bg-card p-5 text-center text-sm text-muted-foreground">
                 Não há horários disponíveis para esta data. Volte e escolha outro dia.
               </div>
