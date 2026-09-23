@@ -115,18 +115,6 @@ export interface Review {
   date: string
 }
 
-export interface Reward {
-  id: string
-  points: number
-  title: string
-  description: string
-}
-
-export interface LoyaltyTier {
-  name: string
-  minPoints: number
-}
-
 export interface CustomerProfile {
   id: string
   name: string
@@ -137,5 +125,4 @@ export interface CustomerProfile {
   preferredCut: string
   beardStyle: string
   notes: string
-  loyaltyPoints: number
 }

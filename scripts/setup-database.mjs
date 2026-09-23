@@ -223,10 +223,24 @@ async function migrateLegacyAppointments() {
   }
 }
 
+async function removeLegacyCustomerLoyalty() {
+  const migrationName = '20260921_remove_customer_loyalty'
+  if (await hasSchemaMigration(migrationName)) return
+
+  if (await hasCustomerColumn('loyalty_points')) {
+    await databaseConnection.query('ALTER TABLE customers DROP COLUMN loyalty_points')
+  }
+
+  await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+    migrationName,
+  ])
+}
+
 try {
   await databaseConnection.query(schema)
   await migrateCustomerEmailVerification()
   await migrateLegacyAppointments()
+  await removeLegacyCustomerLoyalty()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {
   await databaseConnection.end()

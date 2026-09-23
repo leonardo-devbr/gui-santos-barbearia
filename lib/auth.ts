@@ -26,7 +26,6 @@ interface CustomerRow extends RowDataPacket {
   preferred_cut: string
   beard_style: string
   notes: string
-  loyalty_points: number
 }
 
 interface LoginCredentialRow extends RowDataPacket {
@@ -46,7 +45,6 @@ function mapCustomer(row: CustomerRow): CustomerProfile {
     preferredCut: row.preferred_cut,
     beardStyle: row.beard_style,
     notes: row.notes,
-    loyaltyPoints: row.loyalty_points,
   }
 }
 
@@ -191,8 +189,7 @@ export async function getAuthenticatedCustomer() {
       customers.photo_url,
       customers.preferred_cut,
       customers.beard_style,
-      customers.notes,
-      customers.loyalty_points
+      customers.notes
     FROM sessions
     INNER JOIN customers ON customers.id = sessions.customer_id
     WHERE sessions.token_hash = ? AND sessions.expires_at > UTC_TIMESTAMP()

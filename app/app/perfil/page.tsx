@@ -1,9 +1,7 @@
 import type { Metadata } from 'next'
-import { Gem } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { LogoutButton } from '@/components/logout-button'
 import { ProfileForm } from '@/components/profile/profile-form'
-import { getCurrentTier } from '@/data/loyalty'
 import { getAuthenticatedCustomer } from '@/lib/auth'
 
 export const metadata: Metadata = {
@@ -13,8 +11,6 @@ export const metadata: Metadata = {
 export default async function PerfilPage() {
   const currentCustomer = await getAuthenticatedCustomer()
   if (!currentCustomer) return null
-
-  const { current } = getCurrentTier(currentCustomer.loyaltyPoints)
 
   return (
     <div className="flex flex-col gap-8 px-6 py-8 sm:px-8 lg:px-10 lg:py-10">
@@ -35,10 +31,6 @@ export default async function PerfilPage() {
           <div className="flex flex-col gap-1">
             <h2 className="font-serif text-xl text-card-foreground">{currentCustomer.name}</h2>
             <p className="text-sm text-muted-foreground">{currentCustomer.email}</p>
-            <span className="mt-1 flex w-fit items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-              <Gem className="size-3" />
-              Nível {current.name} · {currentCustomer.loyaltyPoints} pts
-            </span>
           </div>
         </div>
         <LogoutButton variant="outline" />
