@@ -121,7 +121,6 @@ export interface CustomerProfile {
   phone: string
   email: string
   birthDate: string
-  photoUrl: string
   preferredCut: string
   beardStyle: string
   notes: string

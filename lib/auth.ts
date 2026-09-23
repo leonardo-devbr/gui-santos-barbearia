@@ -22,7 +22,6 @@ interface CustomerRow extends RowDataPacket {
   phone: string
   email: string
   birth_date: string | null
-  photo_url: string
   preferred_cut: string
   beard_style: string
   notes: string
@@ -41,7 +40,6 @@ function mapCustomer(row: CustomerRow): CustomerProfile {
     phone: row.phone,
     email: row.email,
     birthDate: row.birth_date ?? '',
-    photoUrl: row.photo_url,
     preferredCut: row.preferred_cut,
     beardStyle: row.beard_style,
     notes: row.notes,
@@ -186,7 +184,6 @@ export async function getAuthenticatedCustomer() {
       customers.phone,
       customers.email,
       customers.birth_date,
-      customers.photo_url,
       customers.preferred_cut,
       customers.beard_style,
       customers.notes

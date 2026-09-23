@@ -236,11 +236,25 @@ async function removeLegacyCustomerLoyalty() {
   ])
 }
 
+async function removeLegacyCustomerPhoto() {
+  const migrationName = '20260922_remove_customer_photo'
+  if (await hasSchemaMigration(migrationName)) return
+
+  if (await hasCustomerColumn('photo_url')) {
+    await databaseConnection.query('ALTER TABLE customers DROP COLUMN photo_url')
+  }
+
+  await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+    migrationName,
+  ])
+}
+
 try {
   await databaseConnection.query(schema)
   await migrateCustomerEmailVerification()
   await migrateLegacyAppointments()
   await removeLegacyCustomerLoyalty()
+  await removeLegacyCustomerPhoto()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {
   await databaseConnection.end()

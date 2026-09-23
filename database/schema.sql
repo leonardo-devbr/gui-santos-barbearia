@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS customers (
   pending_email VARCHAR(254) NULL,
   password_hash VARCHAR(255) NOT NULL,
   birth_date DATE NULL,
-  photo_url VARCHAR(512) NOT NULL DEFAULT '/placeholder-user.jpg',
   preferred_cut VARCHAR(100) NOT NULL DEFAULT '',
   beard_style VARCHAR(100) NOT NULL DEFAULT '',
   notes VARCHAR(500) NOT NULL DEFAULT '',
