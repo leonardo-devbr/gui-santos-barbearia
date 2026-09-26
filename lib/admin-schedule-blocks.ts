@@ -2,6 +2,10 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
+import {
+  findAppointmentConflictsForScheduleBlock,
+  summarizeAppointmentConflicts,
+} from '@/lib/admin-appointment-conflicts'
 import { getAuthenticatedStaff, type StaffUser } from '@/lib/admin-auth'
 import { getTodayInSaoPaulo, isValidIsoDate, isValidTime } from '@/lib/date'
 import { getPool, withTransaction } from '@/lib/db'
@@ -166,6 +170,14 @@ export async function createAdminScheduleBlock(body: Record<string, unknown>) {
     )
     if (overlappingBlocks[0]) {
       throw new AdminScheduleBlockError('Já existe um bloqueio para este período.', 409)
+    }
+
+    const appointmentConflicts = await findAppointmentConflictsForScheduleBlock(connection, input)
+    if (appointmentConflicts.length > 0) {
+      throw new AdminScheduleBlockError(
+        `Este bloqueio conflita com: ${summarizeAppointmentConflicts(appointmentConflicts)}. Remarque ou cancele antes de bloquear.`,
+        409,
+      )
     }
 
     const id = randomUUID()

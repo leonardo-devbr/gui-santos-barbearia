@@ -44,6 +44,16 @@ interface CountRow extends RowDataPacket {
   total: number
 }
 
+interface BusinessHourDatabaseRow extends RowDataPacket {
+  is_open: number | boolean
+  open_time: string | null
+  close_time: string | null
+}
+
+interface BarberActiveRow extends RowDataPacket {
+  is_active: number | boolean
+}
+
 const TEST_DATABASE_PREFIX = 'gui_santos_barbearia_test_'
 const testDatabase = `${TEST_DATABASE_PREFIX}${process.pid}_${randomBytes(4).toString('hex')}`
 const testDatabasePattern = /^gui_santos_barbearia_test_\d+_[a-f0-9]{8}$/
@@ -93,6 +103,18 @@ function findNextOpenDate() {
   }
 
   throw new Error('Não foi possível encontrar um dia de atendimento para o teste.')
+}
+
+function getDefaultBusinessHours() {
+  return Array.from({ length: 7 }, (_, weekday) => {
+    const isOpen = weekday >= 2
+    return {
+      weekday,
+      isOpen,
+      openTime: isOpen ? '09:00' : null,
+      closeTime: isOpen ? (weekday === 6 ? '18:00' : '20:00') : null,
+    }
+  })
 }
 
 async function createCustomer(label: string) {
@@ -242,6 +264,17 @@ beforeEach(async () => {
     [staffUserId],
   )
   await applicationPool.query('UPDATE barbers SET is_active = TRUE')
+  await applicationPool.query(
+    `UPDATE business_hours
+     SET
+       is_open = weekday BETWEEN 2 AND 6,
+       open_time = CASE WHEN weekday BETWEEN 2 AND 6 THEN '09:00:00' ELSE NULL END,
+       close_time = CASE
+         WHEN weekday BETWEEN 2 AND 5 THEN '20:00:00'
+         WHEN weekday = 6 THEN '18:00:00'
+         ELSE NULL
+       END`,
+  )
 })
 
 afterAll(async () => {
@@ -416,6 +449,225 @@ describe('agendamentos com MySQL', () => {
 })
 
 describe('acesso da equipe com MySQL', () => {
+  it('impede bloqueios que atinjam agendamentos ativos e permite períodos adjacentes', async () => {
+    const customerId = await createCustomer('conflito-bloqueio')
+    const date = findNextOpenDate()
+    await appointmentModule.createAppointment(customerId, appointmentInput(date, '09:00'))
+    await activateStaffSession(staffUserId)
+
+    await expect(
+      adminScheduleBlockModule.createAdminScheduleBlock({
+        barberId: 'guilherme',
+        date,
+        fullDay: false,
+        startTime: '09:30',
+        endTime: '10:00',
+        reason: 'Pausa',
+      }),
+    ).rejects.toMatchObject({ status: 409, message: expect.stringContaining('09:00') })
+    await expect(
+      adminScheduleBlockModule.createAdminScheduleBlock({
+        barberId: 'all',
+        date,
+        fullDay: true,
+        reason: 'Fechamento',
+      }),
+    ).rejects.toMatchObject({ status: 409, message: expect.stringContaining('09:00') })
+
+    await expect(
+      adminScheduleBlockModule.createAdminScheduleBlock({
+        barberId: 'guilherme',
+        date,
+        fullDay: false,
+        startTime: '08:00',
+        endTime: '09:00',
+        reason: 'Preparação',
+      }),
+    ).resolves.toMatchObject({ startTime: '08:00', endTime: '09:00' })
+    await expect(
+      adminScheduleBlockModule.createAdminScheduleBlock({
+        barberId: 'guilherme',
+        date,
+        fullDay: false,
+        startTime: '09:45',
+        endTime: '10:00',
+        reason: 'Pausa rápida',
+      }),
+    ).resolves.toMatchObject({ startTime: '09:45', endTime: '10:00' })
+  })
+
+  it('impede fechar ou reduzir o expediente sobre agendamentos ativos', async () => {
+    const customerId = await createCustomer('conflito-expediente')
+    const date = findNextOpenDate()
+    const weekday = new Date(`${date}T12:00:00.000Z`).getUTCDay()
+    await appointmentModule.createAppointment(customerId, appointmentInput(date, '09:00'))
+    await activateStaffSession(staffUserId)
+
+    const closedHours = getDefaultBusinessHours().map((hour) =>
+      hour.weekday === weekday
+        ? { ...hour, isOpen: false, openTime: null, closeTime: null }
+        : hour,
+    )
+    await expect(
+      adminBusinessModule.updateAdminBusinessHours({ hours: closedHours }),
+    ).rejects.toMatchObject({ status: 409, message: expect.stringContaining('09:00') })
+
+    const reducedHours = getDefaultBusinessHours().map((hour) =>
+      hour.weekday === weekday ? { ...hour, closeTime: '09:30' } : hour,
+    )
+    await expect(
+      adminBusinessModule.updateAdminBusinessHours({ hours: reducedHours }),
+    ).rejects.toMatchObject({ status: 409, message: expect.stringContaining('09:00') })
+
+    const expandedHours = getDefaultBusinessHours().map((hour) =>
+      hour.weekday === weekday ? { ...hour, openTime: '08:00' } : hour,
+    )
+    await expect(
+      adminBusinessModule.updateAdminBusinessHours({ hours: expandedHours }),
+    ).resolves.toEqual(expandedHours)
+
+    const [rows] = await applicationPool.execute<BusinessHourDatabaseRow[]>(
+      'SELECT is_open, open_time, close_time FROM business_hours WHERE weekday = ?',
+      [weekday],
+    )
+    expect(rows[0]).toMatchObject({ is_open: 1, open_time: '08:00:00' })
+  })
+
+  it('impede desativar barbeiro com agendamento ativo e permite após o cancelamento', async () => {
+    const customerId = await createCustomer('conflito-barbeiro')
+    const date = findNextOpenDate()
+    const appointmentId = await appointmentModule.createAppointment(
+      customerId,
+      appointmentInput(date, '10:00'),
+    )
+    const barberStaffId = await createBarberStaff('guilherme')
+    await activateStaffSession(staffUserId)
+    const barber = (await adminBarberModule.getAdminBarbers()).find(
+      (candidate) => candidate.id === 'guilherme',
+    )!
+
+    await expect(
+      adminBarberModule.updateAdminBarber('guilherme', { ...barber, isActive: false }),
+    ).rejects.toMatchObject({ status: 409, message: expect.stringContaining('10:00') })
+
+    const [activeRows] = await applicationPool.execute<BarberActiveRow[]>(
+      "SELECT is_active FROM barbers WHERE id = 'guilherme'",
+    )
+    const [sessionRows] = await applicationPool.execute<CountRow[]>(
+      'SELECT COUNT(*) AS total FROM staff_sessions WHERE staff_user_id = ?',
+      [barberStaffId],
+    )
+    expect(Boolean(activeRows[0].is_active)).toBe(true)
+    expect(sessionRows[0].total).toBe(1)
+
+    await appointmentModule.cancelAppointment(customerId, appointmentId)
+    await expect(
+      adminBarberModule.updateAdminBarber('guilherme', { ...barber, isActive: false }),
+    ).resolves.toMatchObject({ id: 'guilherme', isActive: false })
+
+    const [remainingSessions] = await applicationPool.execute<CountRow[]>(
+      'SELECT COUNT(*) AS total FROM staff_sessions WHERE staff_user_id = ?',
+      [barberStaffId],
+    )
+    expect(remainingSessions[0].total).toBe(0)
+  })
+
+  it('mantém consistência quando reserva e bloqueio são criados ao mesmo tempo', async () => {
+    const customerId = await createCustomer('corrida-bloqueio')
+    const date = findNextOpenDate()
+    await activateStaffSession(staffUserId)
+
+    const results = await Promise.allSettled([
+      appointmentModule.createAppointment(customerId, appointmentInput(date, '11:00')),
+      adminScheduleBlockModule.createAdminScheduleBlock({
+        barberId: 'guilherme',
+        date,
+        fullDay: false,
+        startTime: '11:00',
+        endTime: '12:00',
+        reason: 'Compromisso',
+      }),
+    ])
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    )
+    expect(failure?.reason).toMatchObject({ status: 409 })
+
+    const [[appointments], [blocks]] = await Promise.all([
+      applicationPool.execute<CountRow[]>(
+        `SELECT COUNT(*) AS total FROM appointments
+         WHERE barber_id = 'guilherme' AND appointment_date = ? AND appointment_time = '11:00:00'`,
+        [date],
+      ),
+      applicationPool.execute<CountRow[]>(
+        `SELECT COUNT(*) AS total FROM schedule_blocks
+         WHERE barber_id = 'guilherme' AND block_date = ? AND start_time = '11:00:00'`,
+        [date],
+      ),
+    ])
+    expect(appointments[0].total + blocks[0].total).toBe(1)
+  })
+
+  it('mantém consistência entre reserva e redução simultânea do expediente', async () => {
+    const customerId = await createCustomer('corrida-expediente')
+    const date = findNextOpenDate()
+    const weekday = new Date(`${date}T12:00:00.000Z`).getUTCDay()
+    await activateStaffSession(staffUserId)
+    const reducedHours = getDefaultBusinessHours().map((hour) =>
+      hour.weekday === weekday ? { ...hour, closeTime: '09:30' } : hour,
+    )
+
+    const results = await Promise.allSettled([
+      appointmentModule.createAppointment(customerId, appointmentInput(date, '09:00')),
+      adminBusinessModule.updateAdminBusinessHours({ hours: reducedHours }),
+    ])
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+
+    const [[appointments], [hours]] = await Promise.all([
+      applicationPool.execute<CountRow[]>(
+        `SELECT COUNT(*) AS total FROM appointments
+         WHERE barber_id = 'guilherme' AND appointment_date = ? AND appointment_time = '09:00:00'`,
+        [date],
+      ),
+      applicationPool.execute<BusinessHourDatabaseRow[]>(
+        'SELECT is_open, open_time, close_time FROM business_hours WHERE weekday = ?',
+        [weekday],
+      ),
+    ])
+    expect(appointments[0].total === 1).toBe(hours[0].close_time !== '09:30:00')
+  })
+
+  it('mantém consistência entre reserva e desativação simultânea do barbeiro', async () => {
+    const customerId = await createCustomer('corrida-barbeiro')
+    const date = findNextOpenDate()
+    await activateStaffSession(staffUserId)
+    const barber = (await adminBarberModule.getAdminBarbers()).find(
+      (candidate) => candidate.id === 'guilherme',
+    )!
+
+    const results = await Promise.allSettled([
+      appointmentModule.createAppointment(customerId, appointmentInput(date, '12:00')),
+      adminBarberModule.updateAdminBarber('guilherme', { ...barber, isActive: false }),
+    ])
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+
+    const [[appointments], [barbers]] = await Promise.all([
+      applicationPool.execute<CountRow[]>(
+        `SELECT COUNT(*) AS total FROM appointments
+         WHERE barber_id = 'guilherme' AND appointment_date = ? AND appointment_time = '12:00:00'`,
+        [date],
+      ),
+      applicationPool.execute<BarberActiveRow[]>(
+        "SELECT is_active FROM barbers WHERE id = 'guilherme'",
+      ),
+    ])
+    expect(appointments[0].total === 1).toBe(Boolean(barbers[0].is_active))
+  })
+
   it('autentica barbeiro vinculado e rejeita conta sem vínculo ou com perfil inativo', async () => {
     const password = 'SenhaSegura123'
     const passwordHash = await authModule.hashPassword(password)

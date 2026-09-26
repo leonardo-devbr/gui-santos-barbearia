@@ -2,6 +2,10 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
+import {
+  findFutureAppointmentsForBarber,
+  summarizeAppointmentConflicts,
+} from '@/lib/admin-appointment-conflicts'
 import { getAuthenticatedStaff } from '@/lib/admin-auth'
 import { getPool, withTransaction } from '@/lib/db'
 import type { AdminBarber } from '@/lib/types'
@@ -19,6 +23,10 @@ interface AdminBarberRow extends RowDataPacket {
 
 interface IdRow extends RowDataPacket {
   id: string
+}
+
+interface BarberStatusRow extends IdRow {
+  is_active: number | boolean
 }
 
 export class AdminBarberError extends Error {
@@ -140,17 +148,29 @@ export async function updateAdminBarber(id: string, body: Record<string, unknown
   const input = validateBarber(body)
 
   return withTransaction(async (connection) => {
-    const [barbers] = await connection.execute<IdRow[]>(
-      'SELECT id FROM barbers WHERE id = ? LIMIT 1 FOR UPDATE',
+    const [barbers] = await connection.execute<BarberStatusRow[]>(
+      'SELECT id, is_active FROM barbers WHERE id = ? LIMIT 1 FOR UPDATE',
       [id],
     )
-    if (!barbers[0]) throw new AdminBarberError('Barbeiro não encontrado.', 404)
+    const barber = barbers[0]
+    if (!barber) throw new AdminBarberError('Barbeiro não encontrado.', 404)
 
     const [duplicates] = await connection.execute<IdRow[]>(
       'SELECT id FROM barbers WHERE name = ? AND id <> ? LIMIT 1 FOR UPDATE',
       [input.name, id],
     )
     if (duplicates[0]) throw new AdminBarberError('Já existe um barbeiro com este nome.', 409)
+
+    const appointmentConflicts =
+      Boolean(barber.is_active) && !input.isActive
+        ? await findFutureAppointmentsForBarber(connection, id)
+        : []
+    if (appointmentConflicts.length > 0) {
+      throw new AdminBarberError(
+        `Este barbeiro possui agendamentos ativos: ${summarizeAppointmentConflicts(appointmentConflicts)}. Remarque ou cancele antes de desativá-lo.`,
+        409,
+      )
+    }
 
     await connection.execute<ResultSetHeader>(
       `UPDATE barbers

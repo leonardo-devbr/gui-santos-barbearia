@@ -1,6 +1,10 @@
 import 'server-only'
 
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
+import {
+  findAppointmentsOutsideBusinessHour,
+  summarizeAppointmentConflicts,
+} from '@/lib/admin-appointment-conflicts'
 import { getAuthenticatedStaff } from '@/lib/admin-auth'
 import { getBusinessConfiguration } from '@/lib/business'
 import { isValidTime } from '@/lib/date'
@@ -8,8 +12,11 @@ import { getPool, withTransaction } from '@/lib/db'
 import type { BusinessHour, BusinessSettings } from '@/lib/types'
 import { isValidEmail, normalizeEmail, normalizePhone } from '@/lib/validation'
 
-interface WeekdayRow extends RowDataPacket {
+interface BusinessHourRow extends RowDataPacket {
   weekday: number
+  is_open: number | boolean
+  open_time: string | null
+  close_time: string | null
 }
 
 export class AdminBusinessError extends Error {
@@ -177,10 +184,32 @@ export async function updateAdminBusinessHours(body: Record<string, unknown>) {
   const hours = validateHours(body)
 
   await withTransaction(async (connection) => {
-    const [existing] = await connection.execute<WeekdayRow[]>(
-      'SELECT weekday FROM business_hours ORDER BY weekday FOR UPDATE',
+    const [existing] = await connection.execute<BusinessHourRow[]>(
+      `SELECT weekday, is_open, open_time, close_time
+       FROM business_hours
+       ORDER BY weekday
+       FOR UPDATE`,
     )
     if (existing.length !== 7) throw new AdminBusinessError('Horários não encontrados.', 404)
+
+    for (const hour of hours) {
+      const current = existing.find((row) => row.weekday === hour.weekday)
+      const changed =
+        !current ||
+        Boolean(current.is_open) !== hour.isOpen ||
+        (current.open_time?.slice(0, 5) ?? null) !== hour.openTime ||
+        (current.close_time?.slice(0, 5) ?? null) !== hour.closeTime
+
+      const appointmentConflicts = changed
+        ? await findAppointmentsOutsideBusinessHour(connection, hour)
+        : []
+      if (appointmentConflicts.length > 0) {
+        throw new AdminBusinessError(
+          `O novo expediente conflita com: ${summarizeAppointmentConflicts(appointmentConflicts)}. Remarque ou cancele antes de salvar.`,
+          409,
+        )
+      }
+    }
 
     for (const hour of hours) {
       await connection.execute<ResultSetHeader>(

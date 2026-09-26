@@ -321,7 +321,7 @@ No navegador, o painel possui as seguintes áreas:
 - `/admin/configuracoes`: contato, endereço, mapa e horários de funcionamento;
 - `/admin/administradores`: acessos de administradores e barbeiros, disponível somente ao administrador.
 
-Serviços e barbeiros são desativados, não apagados, preservando o histórico dos agendamentos. Horários e bloqueios são validados novamente pelo backend ao criar ou remarcar uma reserva. Cada barbeiro possui no máximo uma conta vinculada e não consegue consultar nem alterar a agenda de outro profissional. O administrador atual não pode desativar ou rebaixar a própria conta; trocar senha, papel ou vínculo invalida as sessões anteriores.
+Serviços e barbeiros são desativados, não apagados, preservando o histórico dos agendamentos. Horários e bloqueios são validados novamente pelo backend ao criar ou remarcar uma reserva. O painel também impede criar bloqueios, reduzir o expediente ou desativar um barbeiro quando a mudança conflita com agendamentos ativos. Cada barbeiro possui no máximo uma conta vinculada e não consegue consultar nem alterar a agenda de outro profissional. O administrador atual não pode desativar ou rebaixar a própria conta; trocar senha, papel ou vínculo invalida as sessões anteriores.
 
 ### Perfil
 
