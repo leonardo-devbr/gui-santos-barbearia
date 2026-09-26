@@ -146,6 +146,17 @@ async function hasCustomerIndex(name) {
   return Boolean(rows[0])
 }
 
+async function hasStaffUserIndex(name) {
+  const [rows] = await databaseConnection.execute(
+    `SELECT 1
+     FROM information_schema.statistics
+     WHERE table_schema = DATABASE() AND table_name = 'staff_users' AND index_name = ?
+     LIMIT 1`,
+    [name],
+  )
+  return Boolean(rows[0])
+}
+
 async function hasSchemaMigration(name) {
   const [rows] = await databaseConnection.execute(
     'SELECT 1 FROM schema_migrations WHERE name = ? LIMIT 1',
@@ -249,12 +260,33 @@ async function removeLegacyCustomerPhoto() {
   ])
 }
 
+async function migrateStaffUserBarberAccess() {
+  const migrationName = '20260922_staff_user_barber_access'
+  if (await hasSchemaMigration(migrationName)) return
+
+  if (!(await hasStaffUserIndex('staff_users_barber_id_unique'))) {
+    await databaseConnection.query(
+      'ALTER TABLE staff_users ADD UNIQUE INDEX staff_users_barber_id_unique (barber_id)',
+    )
+  }
+  if (await hasStaffUserIndex('staff_users_barber_id_index')) {
+    await databaseConnection.query(
+      'ALTER TABLE staff_users DROP INDEX staff_users_barber_id_index',
+    )
+  }
+
+  await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+    migrationName,
+  ])
+}
+
 try {
   await databaseConnection.query(schema)
   await migrateCustomerEmailVerification()
   await migrateLegacyAppointments()
   await removeLegacyCustomerLoyalty()
   await removeLegacyCustomerPhoto()
+  await migrateStaffUserBarberAccess()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {
   await databaseConnection.end()

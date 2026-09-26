@@ -1,7 +1,7 @@
 import 'server-only'
 
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
-import { getAuthenticatedAdmin } from '@/lib/admin-auth'
+import { getAuthenticatedStaff } from '@/lib/admin-auth'
 import { getBusinessConfiguration } from '@/lib/business'
 import { isValidTime } from '@/lib/date'
 import { getPool, withTransaction } from '@/lib/db'
@@ -22,8 +22,11 @@ export class AdminBusinessError extends Error {
 }
 
 async function requireAdminAccess() {
-  const admin = await getAuthenticatedAdmin()
-  if (!admin) throw new AdminBusinessError('Acesso administrativo não autorizado.', 401)
+  const staff = await getAuthenticatedStaff()
+  if (!staff) throw new AdminBusinessError('Acesso administrativo não autorizado.', 401)
+  if (staff.role !== 'admin') {
+    throw new AdminBusinessError('Você não tem permissão para alterar as configurações.', 403)
+  }
 }
 
 export async function getAdminBusinessConfiguration() {

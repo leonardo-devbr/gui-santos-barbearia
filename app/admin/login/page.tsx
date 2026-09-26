@@ -5,7 +5,7 @@ import { AdminLoginForm } from '@/components/admin/admin-login-form'
 import { AuthShell } from '@/components/auth-shell'
 
 export const metadata: Metadata = {
-  title: 'Acesso administrativo | Gui Santos Barbearia',
+  title: 'Acesso da equipe | Gui Santos Barbearia',
 }
 
 export default function AdminLoginPage() {
@@ -17,7 +17,7 @@ export default function AdminLoginPage() {
         </div>
         <div className="flex flex-col gap-2">
           <span className="text-xs font-medium tracking-[0.2em] text-primary">ÁREA RESTRITA</span>
-          <h1 className="font-serif text-3xl text-foreground">Painel administrativo</h1>
+          <h1 className="font-serif text-3xl text-foreground">Painel da equipe</h1>
           <p className="text-sm leading-relaxed text-muted-foreground">
             Entre com uma conta autorizada da equipe para gerenciar a agenda.
           </p>

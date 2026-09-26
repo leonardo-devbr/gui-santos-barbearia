@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS staff_users (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY staff_users_email_unique (email),
-  KEY staff_users_barber_id_index (barber_id),
+  UNIQUE KEY staff_users_barber_id_unique (barber_id),
   CONSTRAINT staff_users_barber_id_fk
     FOREIGN KEY (barber_id) REFERENCES barbers (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

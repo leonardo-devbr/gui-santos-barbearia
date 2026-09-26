@@ -27,10 +27,14 @@ export function AdminScheduleBlocks({
   initial,
   barbers,
   today,
+  canSelectBarber,
+  currentBarberId,
 }: {
   initial: ScheduleBlock[]
   barbers: Barber[]
   today: string
+  canSelectBarber: boolean
+  currentBarberId: string | null
 }) {
   const [blocks, setBlocks] = useState(initial)
   const [fullDay, setFullDay] = useState(true)
@@ -112,22 +116,26 @@ export function AdminScheduleBlocks({
               </p>
             </div>
 
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-card-foreground">
-              Barbeiro
-              <select
-                name="barberId"
-                required
-                defaultValue="all"
-                className="h-9 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/50"
-              >
-                <option value="all">Todos os barbeiros</option>
-                {barbers.map((barber) => (
-                  <option key={barber.id} value={barber.id}>
-                    {barber.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {canSelectBarber ? (
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-card-foreground">
+                Barbeiro
+                <select
+                  name="barberId"
+                  required
+                  defaultValue="all"
+                  className="h-9 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/50"
+                >
+                  <option value="all">Todos os barbeiros</option>
+                  {barbers.map((barber) => (
+                    <option key={barber.id} value={barber.id}>
+                      {barber.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <input name="barberId" type="hidden" value={currentBarberId ?? ''} />
+            )}
 
             <label className="flex flex-col gap-1.5 text-sm font-medium text-card-foreground">
               Data
@@ -219,15 +227,17 @@ export function AdminScheduleBlocks({
                     </div>
                   </div>
 
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    onClick={() => void removeBlock(block)}
-                    disabled={Boolean(deletingId)}
-                  >
-                    {deletingId === block.id ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
-                    Remover
-                  </Button>
+                  {block.canDelete && (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      onClick={() => void removeBlock(block)}
+                      disabled={Boolean(deletingId)}
+                    >
+                      {deletingId === block.id ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
+                      Remover
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             ))}

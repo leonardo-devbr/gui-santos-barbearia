@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
-import { getAuthenticatedAdmin } from '@/lib/admin-auth'
+import { getAuthenticatedStaff } from '@/lib/admin-auth'
 import { errorResponse, internalErrorResponse, readJsonObject } from '@/lib/api'
-import { AdminUserError, updateAdminUser } from '@/lib/admin-users'
+import { AdminUserError, updateStaffAccount } from '@/lib/admin-users'
 import {
   consumeRateLimits,
   getClientIdentifier,
@@ -17,8 +17,9 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (!body) return errorResponse('Envie os dados do administrador em JSON.', 400)
 
   try {
-    const admin = await getAuthenticatedAdmin()
+    const admin = await getAuthenticatedStaff()
     if (!admin) return errorResponse('Acesso administrativo não autorizado.', 401)
+    if (admin.role !== 'admin') return errorResponse('Acesso administrativo necessário.', 403)
 
     const rateLimit = await consumeRateLimits([
       {
@@ -37,8 +38,8 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
 
     const { id } = await context.params
-    const result = await updateAdminUser(id, body)
-    return NextResponse.json({ ...result, message: 'Administrador atualizado com sucesso.' })
+    const result = await updateStaffAccount(id, body)
+    return NextResponse.json({ ...result, message: 'Acesso atualizado com sucesso.' })
   } catch (error) {
     if (error instanceof AdminUserError) return errorResponse(error.message, error.status)
     return internalErrorResponse(error)

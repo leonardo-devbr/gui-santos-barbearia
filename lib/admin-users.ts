@@ -2,17 +2,31 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
-import { getAuthenticatedAdmin, getCurrentStaffSessionTokenHash } from '@/lib/admin-auth'
+import { getAuthenticatedStaff, getCurrentStaffSessionTokenHash } from '@/lib/admin-auth'
 import { hashPassword, verifyPassword } from '@/lib/auth'
 import { getPool, withTransaction } from '@/lib/db'
-import type { AdminUser } from '@/lib/types'
+import type { StaffAccount, StaffRole } from '@/lib/types'
 import { isValidEmail, MAX_PASSWORD_LENGTH, normalizeEmail } from '@/lib/validation'
 
-interface AdminUserRow extends RowDataPacket {
+interface StaffAccountRow extends RowDataPacket {
   id: string
   name: string
   email: string
+  role: StaffRole
+  barber_id: string | null
+  barber_name: string | null
   is_active: number | boolean
+}
+
+interface StaffIdentityRow extends RowDataPacket {
+  id: string
+  role: StaffRole
+  barber_id: string | null
+}
+
+interface BarberRow extends RowDataPacket {
+  id: string
+  name: string
 }
 
 interface IdRow extends RowDataPacket {
@@ -33,16 +47,22 @@ export class AdminUserError extends Error {
 }
 
 async function requireAdminAccess() {
-  const admin = await getAuthenticatedAdmin()
-  if (!admin) throw new AdminUserError('Acesso administrativo não autorizado.', 401)
-  return admin
+  const staff = await getAuthenticatedStaff()
+  if (!staff) throw new AdminUserError('Acesso administrativo não autorizado.', 401)
+  if (staff.role !== 'admin') {
+    throw new AdminUserError('Você não tem permissão para gerenciar acessos.', 403)
+  }
+  return staff
 }
 
-function mapAdminUser(row: AdminUserRow, currentAdminId: string): AdminUser {
+function mapStaffAccount(row: StaffAccountRow, currentAdminId: string): StaffAccount {
   return {
     id: row.id,
     name: row.name,
     email: row.email,
+    role: row.role,
+    barberId: row.barber_id,
+    barberName: row.barber_name,
     isActive: Boolean(row.is_active),
     isCurrent: row.id === currentAdminId,
   }
@@ -59,6 +79,23 @@ function validateIdentity(body: Record<string, unknown>) {
     throw new AdminUserError('Informe um e-mail válido.', 422)
   }
   return { name, email }
+}
+
+function validateAccess(body: Record<string, unknown>) {
+  const role = body.role
+  if (role !== 'admin' && role !== 'barber') {
+    throw new AdminUserError('Selecione um tipo de acesso válido.', 422)
+  }
+
+  const rawBarberId = typeof body.barberId === 'string' ? body.barberId.trim() : ''
+  if (role === 'barber' && (!rawBarberId || rawBarberId.length > 64)) {
+    throw new AdminUserError('Vincule a conta a um barbeiro.', 422)
+  }
+
+  return {
+    role,
+    barberId: role === 'barber' ? rawBarberId : null,
+  } satisfies { role: StaffRole; barberId: string | null }
 }
 
 function validatePassword(value: unknown, required: boolean) {
@@ -108,121 +145,169 @@ async function requireCurrentAdminPassword(
   }
 }
 
-export async function getAdminUsers() {
-  const admin = await requireAdminAccess()
-  const [rows] = await getPool().execute<AdminUserRow[]>(
-    `SELECT id, name, email, is_active
-     FROM staff_users
-     WHERE role = 'admin'
-     ORDER BY is_active DESC, name ASC`,
+async function lockBarber(
+  connection: PoolConnection,
+  role: StaffRole,
+  barberId: string | null,
+) {
+  if (role === 'admin') return null
+
+  const [rows] = await connection.execute<BarberRow[]>(
+    'SELECT id, name FROM barbers WHERE id = ? LIMIT 1 FOR UPDATE',
+    [barberId],
   )
-  return rows.map((row) => mapAdminUser(row, admin.id))
+  if (!rows[0]) throw new AdminUserError('Barbeiro não encontrado.', 422)
+  return rows[0]
 }
 
-export async function createAdminUser(body: Record<string, unknown>) {
+async function ensureUniqueAccess(
+  connection: PoolConnection,
+  email: string,
+  barberId: string | null,
+  excludedId?: string,
+) {
+  const [emailRows] = await connection.execute<IdRow[]>(
+    `SELECT id FROM staff_users WHERE email = ? ${excludedId ? 'AND id <> ?' : ''} LIMIT 1 FOR UPDATE`,
+    excludedId ? [email, excludedId] : [email],
+  )
+  if (emailRows[0]) throw new AdminUserError('Já existe uma conta com este e-mail.', 409)
+
+  if (!barberId) return
+  const [barberRows] = await connection.execute<IdRow[]>(
+    `SELECT id FROM staff_users WHERE barber_id = ? ${excludedId ? 'AND id <> ?' : ''} LIMIT 1 FOR UPDATE`,
+    excludedId ? [barberId, excludedId] : [barberId],
+  )
+  if (barberRows[0]) {
+    throw new AdminUserError('Este barbeiro já possui uma conta de acesso.', 409)
+  }
+}
+
+export async function getStaffAccounts() {
+  const admin = await requireAdminAccess()
+  const [rows] = await getPool().execute<StaffAccountRow[]>(
+    `SELECT
+       staff_users.id,
+       staff_users.name,
+       staff_users.email,
+       staff_users.role,
+       staff_users.barber_id,
+       barbers.name AS barber_name,
+       staff_users.is_active
+     FROM staff_users
+     LEFT JOIN barbers ON barbers.id = staff_users.barber_id
+     ORDER BY staff_users.is_active DESC, staff_users.role ASC, staff_users.name ASC`,
+  )
+  return rows.map((row) => mapStaffAccount(row, admin.id))
+}
+
+export async function createStaffAccount(body: Record<string, unknown>) {
   const admin = await requireAdminAccess()
   const sessionTokenHash = await getCurrentStaffSessionTokenHash()
   if (!sessionTokenHash) throw new AdminUserError('Acesso administrativo não autorizado.', 401)
   const identity = validateIdentity(body)
+  const access = validateAccess(body)
   const password = validatePassword(body.password, true)!
   const passwordHash = await hashPassword(password)
 
   return withTransaction(async (connection) => {
-    await requireCurrentAdminPassword(
-      connection,
-      admin.id,
-      sessionTokenHash,
-      body.currentPassword,
-    )
-    const [duplicates] = await connection.execute<IdRow[]>(
-      'SELECT id FROM staff_users WHERE email = ? LIMIT 1 FOR UPDATE',
-      [identity.email],
-    )
-    if (duplicates[0]) throw new AdminUserError('Já existe uma conta com este e-mail.', 409)
+    await requireCurrentAdminPassword(connection, admin.id, sessionTokenHash, body.currentPassword)
+    const barber = await lockBarber(connection, access.role, access.barberId)
+    await ensureUniqueAccess(connection, identity.email, access.barberId)
 
     const id = randomUUID()
     await connection.execute<ResultSetHeader>(
-      `INSERT INTO staff_users (id, name, email, password_hash, role, is_active)
-       VALUES (?, ?, ?, ?, 'admin', TRUE)`,
-      [id, identity.name, identity.email, passwordHash],
+      `INSERT INTO staff_users
+        (id, name, email, password_hash, role, barber_id, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, TRUE)`,
+      [id, identity.name, identity.email, passwordHash, access.role, access.barberId],
     )
 
     return {
       id,
       ...identity,
+      ...access,
+      barberName: barber?.name ?? null,
       isActive: true,
-      isCurrent: id === admin.id,
-    } satisfies AdminUser
+      isCurrent: false,
+    } satisfies StaffAccount
   })
 }
 
-export async function updateAdminUser(id: string, body: Record<string, unknown>) {
+export async function updateStaffAccount(id: string, body: Record<string, unknown>) {
   const admin = await requireAdminAccess()
   const sessionTokenHash = await getCurrentStaffSessionTokenHash()
   if (!sessionTokenHash) throw new AdminUserError('Acesso administrativo não autorizado.', 401)
-  if (!id || id.length > 64) throw new AdminUserError('Administrador não encontrado.', 404)
+  if (!id || id.length > 64) throw new AdminUserError('Conta de acesso não encontrada.', 404)
   const identity = validateIdentity(body)
+  const access = validateAccess(body)
   const password = validatePassword(body.password, false)
   const isActive = body.isActive === true
 
-  if (id === admin.id && !isActive) {
-    throw new AdminUserError('Você não pode desativar a própria conta.', 409)
+  if (id === admin.id && (!isActive || access.role !== 'admin')) {
+    throw new AdminUserError('Você não pode remover o próprio acesso administrativo.', 409)
   }
 
   const passwordHash = password ? await hashPassword(password) : null
 
   return withTransaction(async (connection) => {
-    await requireCurrentAdminPassword(
-      connection,
-      admin.id,
-      sessionTokenHash,
-      body.currentPassword,
-    )
-    const [users] = await connection.execute<IdRow[]>(
-      `SELECT id
+    await requireCurrentAdminPassword(connection, admin.id, sessionTokenHash, body.currentPassword)
+    const [rows] = await connection.execute<StaffIdentityRow[]>(
+      `SELECT id, role, barber_id
        FROM staff_users
-       WHERE id = ? AND role = 'admin'
+       WHERE id = ?
        LIMIT 1
        FOR UPDATE`,
       [id],
     )
-    if (!users[0]) throw new AdminUserError('Administrador não encontrado.', 404)
+    const current = rows[0]
+    if (!current) throw new AdminUserError('Conta de acesso não encontrada.', 404)
 
-    const [duplicates] = await connection.execute<IdRow[]>(
-      'SELECT id FROM staff_users WHERE email = ? AND id <> ? LIMIT 1 FOR UPDATE',
-      [identity.email, id],
-    )
-    if (duplicates[0]) throw new AdminUserError('Já existe uma conta com este e-mail.', 409)
+    const barber = await lockBarber(connection, access.role, access.barberId)
+    await ensureUniqueAccess(connection, identity.email, access.barberId, id)
 
     if (passwordHash) {
       await connection.execute<ResultSetHeader>(
         `UPDATE staff_users
-         SET name = ?, email = ?, password_hash = ?, is_active = ?
+         SET name = ?, email = ?, password_hash = ?, role = ?, barber_id = ?, is_active = ?
          WHERE id = ?`,
-        [identity.name, identity.email, passwordHash, isActive, id],
+        [
+          identity.name,
+          identity.email,
+          passwordHash,
+          access.role,
+          access.barberId,
+          isActive,
+          id,
+        ],
       )
     } else {
       await connection.execute<ResultSetHeader>(
         `UPDATE staff_users
-         SET name = ?, email = ?, is_active = ?
+         SET name = ?, email = ?, role = ?, barber_id = ?, is_active = ?
          WHERE id = ?`,
-        [identity.name, identity.email, isActive, id],
+        [identity.name, identity.email, access.role, access.barberId, isActive, id],
       )
     }
 
-    const invalidatesCurrentSession = Boolean(passwordHash && id === admin.id)
-    if (!isActive || passwordHash) {
-      await connection.execute<ResultSetHeader>('DELETE FROM staff_sessions WHERE staff_user_id = ?', [id])
+    const accessChanged =
+      current.role !== access.role || current.barber_id !== access.barberId
+    if (!isActive || passwordHash || accessChanged) {
+      await connection.execute<ResultSetHeader>(
+        'DELETE FROM staff_sessions WHERE staff_user_id = ?',
+        [id],
+      )
     }
 
     return {
       user: {
         id,
         ...identity,
+        ...access,
+        barberName: barber?.name ?? null,
         isActive,
         isCurrent: id === admin.id,
-      } satisfies AdminUser,
-      invalidatesCurrentSession,
+      } satisfies StaffAccount,
+      invalidatesCurrentSession: Boolean(passwordHash && id === admin.id),
     }
   })
 }

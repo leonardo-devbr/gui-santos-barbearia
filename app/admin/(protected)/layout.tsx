@@ -11,11 +11,12 @@ import {
   UsersRound,
 } from 'lucide-react'
 import { AdminLogoutButton } from '@/components/admin/admin-logout-button'
-import { getAuthenticatedAdmin } from '@/lib/admin-auth'
+import { getAuthenticatedStaff } from '@/lib/admin-auth'
 
 export default async function ProtectedAdminLayout({ children }: { children: React.ReactNode }) {
-  const admin = await getAuthenticatedAdmin()
-  if (!admin) redirect('/admin/login')
+  const staff = await getAuthenticatedStaff()
+  if (!staff) redirect('/admin/login')
+  const isAdmin = staff.role === 'admin'
 
   return (
     <div className="min-h-screen bg-background">
@@ -28,65 +29,69 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
             <div className="flex flex-col">
               <span className="font-serif text-lg text-foreground">Gui Santos</span>
               <span className="text-[10px] font-medium tracking-[0.18em] text-primary">
-                ADMINISTRAÇÃO
+                {isAdmin ? 'ADMINISTRAÇÃO' : 'ÁREA DO BARBEIRO'}
               </span>
             </div>
           </Link>
 
-          <nav className="flex flex-wrap items-center justify-center gap-1" aria-label="Painel administrativo">
+          <nav className="flex flex-wrap items-center justify-center gap-1" aria-label="Painel da equipe">
             <Link
               href="/admin"
               className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <LayoutDashboard className="size-4" />
-              Resumo
+              {isAdmin ? 'Resumo' : 'Meu dia'}
             </Link>
             <Link
               href="/admin/agendamentos"
               className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <CalendarDays className="size-4" />
-              Agenda
+              {isAdmin ? 'Agenda' : 'Minha agenda'}
             </Link>
             <Link
               href="/admin/bloqueios"
               className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <CalendarOff className="size-4" />
-              Bloqueios
+              {isAdmin ? 'Bloqueios' : 'Meus bloqueios'}
             </Link>
-            <Link
-              href="/admin/servicos"
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <Scissors className="size-4" />
-              Serviços
-            </Link>
-            <Link
-              href="/admin/barbeiros"
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <UsersRound className="size-4" />
-              Barbeiros
-            </Link>
-            <Link
-              href="/admin/configuracoes"
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <Settings className="size-4" />
-              Configurações
-            </Link>
-            <Link
-              href="/admin/administradores"
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <UserCog className="size-4" />
-              Administradores
-            </Link>
+            {isAdmin && (
+              <>
+                <Link
+                  href="/admin/servicos"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <Scissors className="size-4" />
+                  Serviços
+                </Link>
+                <Link
+                  href="/admin/barbeiros"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <UsersRound className="size-4" />
+                  Barbeiros
+                </Link>
+                <Link
+                  href="/admin/configuracoes"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <Settings className="size-4" />
+                  Configurações
+                </Link>
+                <Link
+                  href="/admin/administradores"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <UserCog className="size-4" />
+                  Acessos
+                </Link>
+              </>
+            )}
           </nav>
 
           <div className="flex items-center gap-2">
-            <span className="hidden text-sm text-muted-foreground md:inline">{admin.name}</span>
+            <span className="hidden text-sm text-muted-foreground md:inline">{staff.name}</span>
             <AdminLogoutButton />
           </div>
         </div>

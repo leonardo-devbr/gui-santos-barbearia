@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { AdminBusinessManager } from '@/components/admin/admin-business-manager'
+import { requireAdminPageAccess } from '@/lib/admin-page-access'
 import { getAdminBusinessConfiguration } from '@/lib/admin-business'
 
 export const metadata: Metadata = {
@@ -7,6 +8,7 @@ export const metadata: Metadata = {
 }
 
 export default async function AdminSettingsPage() {
+  await requireAdminPageAccess()
   const configuration = await getAdminBusinessConfiguration()
 
   return (

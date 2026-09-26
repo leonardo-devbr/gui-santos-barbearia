@@ -2,7 +2,7 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
-import { getAuthenticatedAdmin } from '@/lib/admin-auth'
+import { getAuthenticatedStaff } from '@/lib/admin-auth'
 import { getPool, withTransaction } from '@/lib/db'
 import type { AdminService, Service } from '@/lib/types'
 
@@ -32,8 +32,11 @@ export class AdminServiceError extends Error {
 }
 
 async function requireAdminAccess() {
-  const admin = await getAuthenticatedAdmin()
-  if (!admin) throw new AdminServiceError('Acesso administrativo não autorizado.', 401)
+  const staff = await getAuthenticatedStaff()
+  if (!staff) throw new AdminServiceError('Acesso administrativo não autorizado.', 401)
+  if (staff.role !== 'admin') {
+    throw new AdminServiceError('Você não tem permissão para gerenciar serviços.', 403)
+  }
 }
 
 function mapService(row: AdminServiceRow): AdminService {

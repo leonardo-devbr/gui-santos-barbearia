@@ -111,6 +111,7 @@ try {
        name = VALUES(name),
        password_hash = VALUES(password_hash),
        role = 'admin',
+       barber_id = NULL,
        is_active = TRUE`,
     [randomUUID(), name, email, passwordHash],
   )

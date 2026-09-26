@@ -1,7 +1,7 @@
 import 'server-only'
 
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
-import { getAuthenticatedAdmin } from '@/lib/admin-auth'
+import { getAuthenticatedStaff } from '@/lib/admin-auth'
 import { getTodayInSaoPaulo } from '@/lib/date'
 import { getPool, withTransaction } from '@/lib/db'
 import type { AdminAppointment, AppointmentStatus } from '@/lib/types'
@@ -24,6 +24,7 @@ interface AdminAppointmentRow extends RowDataPacket {
 
 interface AppointmentStatusRow extends RowDataPacket {
   status: AppointmentStatus
+  barber_id: string
 }
 
 interface DashboardRow extends RowDataPacket {
@@ -51,10 +52,13 @@ export class AdminAppointmentError extends Error {
   }
 }
 
-async function requireAdminAccess() {
-  const admin = await getAuthenticatedAdmin()
-  if (!admin) throw new AdminAppointmentError('Acesso administrativo não autorizado.', 401)
-  return admin
+async function requireStaffAccess() {
+  const staff = await getAuthenticatedStaff()
+  if (!staff) throw new AdminAppointmentError('Acesso da equipe não autorizado.', 401)
+  if (staff.role === 'barber' && !staff.barberId) {
+    throw new AdminAppointmentError('Esta conta não está vinculada a um barbeiro.', 403)
+  }
+  return staff
 }
 
 function mapAppointment(row: AdminAppointmentRow): AdminAppointment {
@@ -75,8 +79,17 @@ function mapAppointment(row: AdminAppointmentRow): AdminAppointment {
   }
 }
 
-export async function getAdminAppointments(date = getTodayInSaoPaulo()) {
-  await requireAdminAccess()
+export async function getAdminAppointments(
+  date = getTodayInSaoPaulo(),
+  requestedBarberId?: string,
+) {
+  const staff = await requireStaffAccess()
+  if (requestedBarberId && requestedBarberId.length > 64) {
+    throw new AdminAppointmentError('Barbeiro inválido.', 422)
+  }
+  const barberId = staff.role === 'barber' ? staff.barberId : requestedBarberId
+  const barberClause = barberId ? 'AND appointments.barber_id = ?' : ''
+  const parameters = barberId ? [date, barberId] : [date]
 
   const [rows] = await getPool().execute<AdminAppointmentRow[]>(
     `SELECT
@@ -98,16 +111,20 @@ export async function getAdminAppointments(date = getTodayInSaoPaulo()) {
     INNER JOIN barbers ON barbers.id = appointments.barber_id
     INNER JOIN customers ON customers.id = appointments.customer_id
     WHERE appointments.appointment_date = ?
+      ${barberClause}
     ORDER BY appointments.appointment_time ASC`,
-    [date],
+    parameters,
   )
 
   return rows.map(mapAppointment)
 }
 
 export async function getAdminDashboardMetrics(): Promise<AdminDashboardMetrics> {
-  await requireAdminAccess()
+  const staff = await requireStaffAccess()
   const today = getTodayInSaoPaulo()
+  const barberClause = staff.role === 'barber' ? 'WHERE barber_id = ?' : ''
+  const parameters: string[] = [today, today, today, today, today, today]
+  if (staff.role === 'barber') parameters.push(staff.barberId!)
 
   const [rows] = await getPool().execute<DashboardRow[]>(
     `SELECT
@@ -120,8 +137,9 @@ export async function getAdminDashboardMetrics(): Promise<AdminDashboardMetrics>
         AND status IN ('confirmado', 'pendente')
       ) AS upcoming_week,
       COALESCE(SUM(IF(appointment_date = ? AND status = 'concluido', price, 0)), 0) AS revenue_today
-    FROM appointments`,
-    [today, today, today, today, today, today],
+    FROM appointments
+    ${barberClause}`,
+    parameters,
   )
   const row = rows[0]
 
@@ -138,12 +156,18 @@ export async function updateAdminAppointmentStatus(
   appointmentId: string,
   nextStatus: Extract<AppointmentStatus, 'concluido' | 'cancelado'>,
 ) {
-  await requireAdminAccess()
+  const staff = await requireStaffAccess()
 
   return withTransaction(async (connection) => {
+    const barberClause = staff.role === 'barber' ? 'AND barber_id = ?' : ''
+    const parameters = staff.role === 'barber' ? [appointmentId, staff.barberId!] : [appointmentId]
     const [rows] = await connection.execute<AppointmentStatusRow[]>(
-      'SELECT status FROM appointments WHERE id = ? LIMIT 1 FOR UPDATE',
-      [appointmentId],
+      `SELECT status, barber_id
+       FROM appointments
+       WHERE id = ? ${barberClause}
+       LIMIT 1
+       FOR UPDATE`,
+      parameters,
     )
     const appointment = rows[0]
 

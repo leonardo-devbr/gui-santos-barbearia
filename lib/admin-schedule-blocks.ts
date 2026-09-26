@@ -2,7 +2,7 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
-import { getAuthenticatedAdmin } from '@/lib/admin-auth'
+import { getAuthenticatedStaff, type StaffUser } from '@/lib/admin-auth'
 import { getTodayInSaoPaulo, isValidIsoDate, isValidTime } from '@/lib/date'
 import { getPool, withTransaction } from '@/lib/db'
 import type { ScheduleBlock } from '@/lib/types'
@@ -15,6 +15,7 @@ interface ScheduleBlockRow extends RowDataPacket {
   start_time: string | null
   end_time: string | null
   reason: string
+  created_by: string
 }
 
 interface BarberRow extends RowDataPacket {
@@ -35,13 +36,16 @@ export class AdminScheduleBlockError extends Error {
   }
 }
 
-async function requireAdminAccess() {
-  const admin = await getAuthenticatedAdmin()
-  if (!admin) throw new AdminScheduleBlockError('Acesso administrativo não autorizado.', 401)
-  return admin
+async function requireStaffAccess() {
+  const staff = await getAuthenticatedStaff()
+  if (!staff) throw new AdminScheduleBlockError('Acesso da equipe não autorizado.', 401)
+  if (staff.role === 'barber' && !staff.barberId) {
+    throw new AdminScheduleBlockError('Esta conta não está vinculada a um barbeiro.', 403)
+  }
+  return staff
 }
 
-function mapScheduleBlock(row: ScheduleBlockRow): ScheduleBlock {
+function mapScheduleBlock(row: ScheduleBlockRow, staff: StaffUser): ScheduleBlock {
   return {
     id: row.id,
     barberId: row.barber_id,
@@ -50,6 +54,9 @@ function mapScheduleBlock(row: ScheduleBlockRow): ScheduleBlock {
     startTime: row.start_time?.slice(0, 5) ?? null,
     endTime: row.end_time?.slice(0, 5) ?? null,
     reason: row.reason,
+    canDelete:
+      staff.role === 'admin' ||
+      (row.barber_id === staff.barberId && row.created_by === staff.id),
   }
 }
 
@@ -89,7 +96,11 @@ function validateInput(body: Record<string, unknown>) {
 }
 
 export async function getAdminScheduleBlocks() {
-  await requireAdminAccess()
+  const staff = await requireStaffAccess()
+  const scopeClause =
+    staff.role === 'barber' ? 'AND (schedule_blocks.barber_id = ? OR schedule_blocks.barber_id IS NULL)' : ''
+  const parameters =
+    staff.role === 'barber' ? [getTodayInSaoPaulo(), staff.barberId!] : [getTodayInSaoPaulo()]
 
   const [rows] = await getPool().execute<ScheduleBlockRow[]>(
     `SELECT
@@ -99,20 +110,24 @@ export async function getAdminScheduleBlocks() {
       schedule_blocks.block_date,
       schedule_blocks.start_time,
       schedule_blocks.end_time,
-      schedule_blocks.reason
+      schedule_blocks.reason,
+      schedule_blocks.created_by
     FROM schedule_blocks
     LEFT JOIN barbers ON barbers.id = schedule_blocks.barber_id
     WHERE schedule_blocks.block_date >= ?
+      ${scopeClause}
     ORDER BY schedule_blocks.block_date ASC, schedule_blocks.start_time ASC, barber_name ASC`,
-    [getTodayInSaoPaulo()],
+    parameters,
   )
 
-  return rows.map(mapScheduleBlock)
+  return rows.map((row) => mapScheduleBlock(row, staff))
 }
 
 export async function createAdminScheduleBlock(body: Record<string, unknown>) {
-  const admin = await requireAdminAccess()
-  const input = validateInput(body)
+  const staff = await requireStaffAccess()
+  const scopedBody =
+    staff.role === 'barber' ? { ...body, barberId: staff.barberId } : body
+  const input = validateInput(scopedBody)
 
   return withTransaction(async (connection) => {
     const [barbers] = await connection.execute<BarberRow[]>(
@@ -165,7 +180,7 @@ export async function createAdminScheduleBlock(body: Record<string, unknown>) {
         input.startTime ? `${input.startTime}:00` : null,
         input.endTime ? `${input.endTime}:00` : null,
         input.reason,
-        admin.id,
+        staff.id,
       ],
     )
 
@@ -177,17 +192,22 @@ export async function createAdminScheduleBlock(body: Record<string, unknown>) {
       startTime: input.startTime,
       endTime: input.endTime,
       reason: input.reason,
+      canDelete: true,
     } satisfies ScheduleBlock
   })
 }
 
 export async function deleteAdminScheduleBlock(id: string) {
-  await requireAdminAccess()
+  const staff = await requireStaffAccess()
   if (!id || id.length > 64) throw new AdminScheduleBlockError('Bloqueio não encontrado.', 404)
 
+  const scopeClause =
+    staff.role === 'barber' ? 'AND barber_id = ? AND created_by = ?' : ''
+  const parameters =
+    staff.role === 'barber' ? [id, staff.barberId!, staff.id] : [id]
   const [result] = await getPool().execute<ResultSetHeader>(
-    'DELETE FROM schedule_blocks WHERE id = ?',
-    [id],
+    `DELETE FROM schedule_blocks WHERE id = ? ${scopeClause}`,
+    parameters,
   )
   if (result.affectedRows === 0) {
     throw new AdminScheduleBlockError('Bloqueio não encontrado.', 404)

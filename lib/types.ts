@@ -57,6 +57,7 @@ export interface ScheduleBlock {
   startTime: string | null
   endTime: string | null
   reason: string
+  canDelete: boolean
 }
 
 export interface BusinessSettings {
@@ -87,10 +88,15 @@ export interface BusinessConfiguration {
   hours: BusinessHour[]
 }
 
-export interface AdminUser {
+export type StaffRole = 'admin' | 'barber'
+
+export interface StaffAccount {
   id: string
   name: string
   email: string
+  role: StaffRole
+  barberId: string | null
+  barberName: string | null
   isActive: boolean
   isCurrent: boolean
 }

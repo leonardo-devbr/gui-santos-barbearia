@@ -1,24 +1,27 @@
 import type { Metadata } from 'next'
 import { AdminUsersManager } from '@/components/admin/admin-users-manager'
-import { getAdminUsers } from '@/lib/admin-users'
+import { requireAdminPageAccess } from '@/lib/admin-page-access'
+import { getAdminBarbers } from '@/lib/admin-barbers'
+import { getStaffAccounts } from '@/lib/admin-users'
 
 export const metadata: Metadata = {
-  title: 'Administradores | Gui Santos Barbearia',
+  title: 'Acessos da equipe | Gui Santos Barbearia',
 }
 
 export default async function AdminUsersPage() {
-  const users = await getAdminUsers()
+  await requireAdminPageAccess()
+  const [users, barbers] = await Promise.all([getStaffAccounts(), getAdminBarbers()])
 
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-1">
         <span className="text-xs font-medium tracking-[0.2em] text-primary">ACESSO</span>
-        <h1 className="font-serif text-3xl text-foreground">Administradores</h1>
+        <h1 className="font-serif text-3xl text-foreground">Acessos da equipe</h1>
         <p className="text-sm text-muted-foreground">
-          Controle quem pode acessar e alterar a operação da barbearia.
+          Defina os administradores e vincule cada barbeiro à própria agenda.
         </p>
       </div>
-      <AdminUsersManager initial={users} />
+      <AdminUsersManager initial={users} barbers={barbers} />
     </div>
   )
 }

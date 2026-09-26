@@ -4,6 +4,7 @@ import { cookies } from 'next/headers'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { createToken, hashToken, verifyPassword } from '@/lib/auth'
 import { getPool, withTransaction } from '@/lib/db'
+import type { StaffRole } from '@/lib/types'
 
 const LEGACY_STAFF_COOKIE_NAME = 'gui_santos_staff_session'
 const STAFF_COOKIE_NAME =
@@ -16,7 +17,7 @@ export interface StaffUser {
   id: string
   name: string
   email: string
-  role: 'admin' | 'barber'
+  role: StaffRole
   barberId: string | null
 }
 
@@ -32,6 +33,8 @@ interface StaffLoginRow extends RowDataPacket {
   id: string
   password_hash: string
   role: StaffUser['role']
+  barber_id: string | null
+  barber_is_active: number | boolean | null
   is_active: number | boolean
 }
 
@@ -40,17 +43,24 @@ export async function getCurrentStaffSessionTokenHash() {
   return token ? hashToken(token) : null
 }
 
-export async function authenticateAdmin(email: string, password: string) {
+export async function authenticateStaff(email: string, password: string) {
   const cookieStore = await cookies()
   const previousToken = cookieStore.get(STAFF_COOKIE_NAME)?.value
   const token = createToken()
   const tokenHash = hashToken(token)
   const expiresAt = new Date(Date.now() + STAFF_SESSION_MAX_AGE_SECONDS * 1000)
-  const authenticated = await withTransaction(async (connection) => {
+  const authenticatedRole = await withTransaction<StaffRole | null>(async (connection) => {
     const [rows] = await connection.execute<StaffLoginRow[]>(
-      `SELECT id, password_hash, role, is_active
+      `SELECT
+         staff_users.id,
+         staff_users.password_hash,
+         staff_users.role,
+         staff_users.barber_id,
+         staff_users.is_active,
+         barbers.is_active AS barber_is_active
        FROM staff_users
-       WHERE email = ?
+       LEFT JOIN barbers ON barbers.id = staff_users.barber_id
+       WHERE staff_users.email = ?
        LIMIT 1
        FOR UPDATE`,
       [email],
@@ -61,7 +71,16 @@ export async function authenticateAdmin(email: string, password: string) {
       staff?.password_hash ?? DUMMY_PASSWORD_HASH,
     )
 
-    if (!staff || staff.role !== 'admin' || !staff.is_active || !passwordMatches) return false
+    const hasValidBarberAccess =
+      staff?.role === 'barber' && Boolean(staff.barber_id) && Boolean(staff.barber_is_active)
+    if (
+      !staff ||
+      !staff.is_active ||
+      !passwordMatches ||
+      (staff.role !== 'admin' && !hasValidBarberAccess)
+    ) {
+      return null
+    }
 
     await connection.execute('DELETE FROM staff_sessions WHERE expires_at <= UTC_TIMESTAMP()')
     if (previousToken) {
@@ -88,10 +107,10 @@ export async function authenticateAdmin(email: string, password: string) {
          )`,
       [staff.id, tokenHash, staff.id, tokenHash],
     )
-    return true
+    return staff.role
   })
 
-  if (!authenticated) return false
+  if (!authenticatedRole) return null
 
   cookieStore.set(STAFF_COOKIE_NAME, token, {
     httpOnly: true,
@@ -104,7 +123,7 @@ export async function authenticateAdmin(email: string, password: string) {
   if (STAFF_COOKIE_NAME !== LEGACY_STAFF_COOKIE_NAME) {
     cookieStore.delete(LEGACY_STAFF_COOKIE_NAME)
   }
-  return true
+  return authenticatedRole
 }
 
 export async function destroyStaffSession() {
@@ -131,9 +150,18 @@ export async function getAuthenticatedStaff(): Promise<StaffUser | null> {
     `SELECT staff_users.id, staff_users.name, staff_users.email, staff_users.role, staff_users.barber_id
      FROM staff_sessions
      INNER JOIN staff_users ON staff_users.id = staff_sessions.staff_user_id
+     LEFT JOIN barbers ON barbers.id = staff_users.barber_id
      WHERE staff_sessions.token_hash = ?
        AND staff_sessions.expires_at > UTC_TIMESTAMP()
        AND staff_users.is_active = TRUE
+       AND (
+         staff_users.role = 'admin'
+         OR (
+           staff_users.role = 'barber'
+           AND staff_users.barber_id IS NOT NULL
+           AND barbers.is_active = TRUE
+         )
+       )
      LIMIT 1`,
     [hashToken(token)],
   )

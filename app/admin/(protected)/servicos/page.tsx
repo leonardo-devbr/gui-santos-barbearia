@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { AdminServicesManager } from '@/components/admin/admin-services-manager'
+import { requireAdminPageAccess } from '@/lib/admin-page-access'
 import { getAdminServices } from '@/lib/admin-services'
 
 export const metadata: Metadata = {
@@ -7,6 +8,7 @@ export const metadata: Metadata = {
 }
 
 export default async function AdminServicesPage() {
+  await requireAdminPageAccess()
   const services = await getAdminServices()
 
   return (

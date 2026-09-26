@@ -5,6 +5,7 @@ import { AdminAppointmentsList } from '@/components/admin/admin-appointments-lis
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { getAdminAppointments, getAdminDashboardMetrics } from '@/lib/admin-appointments'
+import { requireStaffPageAccess } from '@/lib/admin-page-access'
 import { getTodayInSaoPaulo } from '@/lib/date'
 import { formatPrice } from '@/lib/format'
 
@@ -13,6 +14,8 @@ export const metadata: Metadata = {
 }
 
 export default async function AdminDashboardPage() {
+  const staff = await requireStaffPageAccess()
+  const isAdmin = staff.role === 'admin'
   const today = getTodayInSaoPaulo()
   const [metrics, appointments] = await Promise.all([
     getAdminDashboardMetrics(),
@@ -22,10 +25,16 @@ export default async function AdminDashboardPage() {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-1">
-        <span className="text-xs font-medium tracking-[0.2em] text-primary">VISÃO GERAL</span>
-        <h1 className="font-serif text-3xl text-foreground">Painel administrativo</h1>
+        <span className="text-xs font-medium tracking-[0.2em] text-primary">
+          {isAdmin ? 'VISÃO GERAL' : 'MINHA ROTINA'}
+        </span>
+        <h1 className="font-serif text-3xl text-foreground">
+          {isAdmin ? 'Painel administrativo' : `Olá, ${staff.name.split(' ')[0]}`}
+        </h1>
         <p className="text-sm text-muted-foreground">
-          Acompanhe a operação da barbearia e os atendimentos de hoje.
+          {isAdmin
+            ? 'Acompanhe a operação da barbearia e os atendimentos de hoje.'
+            : 'Acompanhe seus atendimentos e organize sua disponibilidade.'}
         </p>
       </div>
 
@@ -33,13 +42,17 @@ export default async function AdminDashboardPage() {
         <MetricCard icon={CalendarCheck} label="Agendamentos hoje" value={metrics.appointmentsToday} />
         <MetricCard icon={CheckCircle2} label="Concluídos hoje" value={metrics.completedToday} />
         <MetricCard icon={CalendarClock} label="Próximos 7 dias" value={metrics.upcomingWeek} />
-        <MetricCard icon={CircleDollarSign} label="Receita concluída hoje" value={formatPrice(metrics.revenueToday)} />
+        {isAdmin && (
+          <MetricCard icon={CircleDollarSign} label="Receita concluída hoje" value={formatPrice(metrics.revenueToday)} />
+        )}
       </div>
 
       <section className="flex flex-col gap-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="font-serif text-2xl text-foreground">Agenda de hoje</h2>
+            <h2 className="font-serif text-2xl text-foreground">
+              {isAdmin ? 'Agenda de hoje' : 'Minha agenda de hoje'}
+            </h2>
             <p className="text-sm text-muted-foreground">
               {metrics.cancelledToday} cancelamento(s) registrado(s) hoje.
             </p>

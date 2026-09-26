@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { authenticateAdmin } from '@/lib/admin-auth'
+import { authenticateStaff } from '@/lib/admin-auth'
 import { errorResponse, internalErrorResponse, readJsonObject } from '@/lib/api'
 import {
   consumeRateLimits,
@@ -37,12 +37,13 @@ export async function POST(request: Request) {
     ])
     if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
 
-    if (!(await authenticateAdmin(email, password))) {
+    const role = await authenticateStaff(email, password)
+    if (!role) {
       return errorResponse('E-mail ou senha incorretos.', 401)
     }
 
     await resetRateLimit('admin-login-email', email)
-    return NextResponse.json({ message: 'Acesso administrativo autorizado.' })
+    return NextResponse.json({ role, message: 'Acesso da equipe autorizado.' })
   } catch (error) {
     return internalErrorResponse(error)
   }

@@ -2,7 +2,7 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
-import { getAuthenticatedAdmin } from '@/lib/admin-auth'
+import { getAuthenticatedStaff } from '@/lib/admin-auth'
 import { getPool, withTransaction } from '@/lib/db'
 import type { AdminBarber } from '@/lib/types'
 
@@ -31,8 +31,11 @@ export class AdminBarberError extends Error {
 }
 
 async function requireAdminAccess() {
-  const admin = await getAuthenticatedAdmin()
-  if (!admin) throw new AdminBarberError('Acesso administrativo não autorizado.', 401)
+  const staff = await getAuthenticatedStaff()
+  if (!staff) throw new AdminBarberError('Acesso administrativo não autorizado.', 401)
+  if (staff.role !== 'admin') {
+    throw new AdminBarberError('Você não tem permissão para gerenciar barbeiros.', 403)
+  }
 }
 
 function mapBarber(row: AdminBarberRow): AdminBarber {
@@ -164,6 +167,16 @@ export async function updateAdminBarber(id: string, body: Record<string, unknown
         id,
       ],
     )
+
+    if (!input.isActive) {
+      await connection.execute<ResultSetHeader>(
+        `DELETE staff_sessions
+         FROM staff_sessions
+         INNER JOIN staff_users ON staff_users.id = staff_sessions.staff_user_id
+         WHERE staff_users.barber_id = ?`,
+        [id],
+      )
+    }
 
     return { id, ...input } satisfies AdminBarber
   })

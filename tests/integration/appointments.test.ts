@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import mysql, {
@@ -7,9 +7,26 @@ import mysql, {
   type ResultSetHeader,
   type RowDataPacket,
 } from 'mysql2/promise'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addDaysToIsoDate, getTodayInSaoPaulo } from '@/lib/date'
 import type { AppointmentInput } from '@/lib/appointments'
+
+const staffCookies = vi.hoisted(() => new Map<string, string>())
+
+vi.mock('next/headers', () => ({
+  cookies: async () => ({
+    get(name: string) {
+      const value = staffCookies.get(name)
+      return value ? { name, value } : undefined
+    },
+    set(name: string, value: string) {
+      staffCookies.set(name, value)
+    },
+    delete(name: string) {
+      staffCookies.delete(name)
+    },
+  }),
+}))
 
 interface AppointmentDatabaseRow extends RowDataPacket {
   id: string
@@ -49,6 +66,14 @@ let applicationPool: Pool
 let databaseCreated = false
 let appointmentModule: typeof import('@/lib/appointments')
 let databaseModule: typeof import('@/lib/db')
+let adminAppointmentModule: typeof import('@/lib/admin-appointments')
+let adminScheduleBlockModule: typeof import('@/lib/admin-schedule-blocks')
+let adminAuthModule: typeof import('@/lib/admin-auth')
+let adminBarberModule: typeof import('@/lib/admin-barbers')
+let adminBusinessModule: typeof import('@/lib/admin-business')
+let adminServiceModule: typeof import('@/lib/admin-services')
+let adminUserModule: typeof import('@/lib/admin-users')
+let authModule: typeof import('@/lib/auth')
 
 function restoreEnvironment() {
   for (const name of environmentKeys) {
@@ -78,6 +103,28 @@ async function createCustomer(label: string) {
      VALUES (?, ?, '11999999999', ?, UTC_TIMESTAMP(), 'scrypt:test')`,
     [id, `Cliente ${label}`, `${label}-${id}@example.test`],
   )
+  return id
+}
+
+async function activateStaffSession(staffId: string) {
+  const token = randomBytes(32).toString('base64url')
+  const tokenHash = createHash('sha256').update(token).digest('hex')
+  await applicationPool.execute<ResultSetHeader>(
+    `INSERT INTO staff_sessions (token_hash, staff_user_id, expires_at)
+     VALUES (?, ?, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 HOUR))`,
+    [tokenHash, staffId],
+  )
+  staffCookies.set('gui_santos_staff_session', token)
+}
+
+async function createBarberStaff(barberId: string) {
+  const id = randomUUID()
+  await applicationPool.execute<ResultSetHeader>(
+    `INSERT INTO staff_users (id, name, email, password_hash, role, barber_id, is_active)
+     VALUES (?, ?, ?, 'scrypt:test', 'barber', ?, TRUE)`,
+    [id, `Barbeiro ${barberId}`, `${id}@example.test`, barberId],
+  )
+  await activateStaffSession(id)
   return id
 }
 
@@ -161,10 +208,19 @@ beforeAll(async () => {
 
   databaseModule = await import('@/lib/db')
   appointmentModule = await import('@/lib/appointments')
+  adminAppointmentModule = await import('@/lib/admin-appointments')
+  adminScheduleBlockModule = await import('@/lib/admin-schedule-blocks')
+  adminAuthModule = await import('@/lib/admin-auth')
+  adminBarberModule = await import('@/lib/admin-barbers')
+  adminBusinessModule = await import('@/lib/admin-business')
+  adminServiceModule = await import('@/lib/admin-services')
+  adminUserModule = await import('@/lib/admin-users')
+  authModule = await import('@/lib/auth')
   applicationPool = databaseModule.getPool()
 })
 
 beforeEach(async () => {
+  staffCookies.clear()
   for (const table of [
     'email_notifications',
     'schedule_blocks',
@@ -185,6 +241,7 @@ beforeEach(async () => {
      VALUES (?, 'Administrador dos testes', 'admin@example.test', 'scrypt:test', 'admin')`,
     [staffUserId],
   )
+  await applicationPool.query('UPDATE barbers SET is_active = TRUE')
 })
 
 afterAll(async () => {
@@ -355,5 +412,231 @@ describe('agendamentos com MySQL', () => {
     await expect(
       appointmentModule.cancelAppointment(firstCustomer, firstAppointment),
     ).rejects.toMatchObject({ status: 409 })
+  })
+})
+
+describe('acesso da equipe com MySQL', () => {
+  it('autentica barbeiro vinculado e rejeita conta sem vínculo ou com perfil inativo', async () => {
+    const password = 'SenhaSegura123'
+    const passwordHash = await authModule.hashPassword(password)
+    const linkedId = randomUUID()
+    await applicationPool.execute<ResultSetHeader>(
+      `INSERT INTO staff_users (id, name, email, password_hash, role, barber_id, is_active)
+       VALUES (?, 'Barbeiro vinculado', 'barber@example.test', ?, 'barber', 'guilherme', TRUE)`,
+      [linkedId, passwordHash],
+    )
+
+    await expect(
+      adminAuthModule.authenticateStaff('barber@example.test', password),
+    ).resolves.toBe('barber')
+    expect(staffCookies.get('gui_santos_staff_session')).toBeTruthy()
+
+    staffCookies.clear()
+    await applicationPool.query("UPDATE barbers SET is_active = FALSE WHERE id = 'guilherme'")
+    await expect(
+      adminAuthModule.authenticateStaff('barber@example.test', password),
+    ).resolves.toBeNull()
+
+    await applicationPool.execute<ResultSetHeader>(
+      `INSERT INTO staff_users (id, name, email, password_hash, role, barber_id, is_active)
+       VALUES (?, 'Barbeiro sem vínculo', 'orphan@example.test', ?, 'barber', NULL, TRUE)`,
+      [randomUUID(), passwordHash],
+    )
+    await expect(
+      adminAuthModule.authenticateStaff('orphan@example.test', password),
+    ).resolves.toBeNull()
+  })
+
+  it('limita a leitura e a atualização do barbeiro à própria agenda', async () => {
+    const firstCustomer = await createCustomer('equipe-a')
+    const secondCustomer = await createCustomer('equipe-b')
+    const date = findNextOpenDate()
+    const ownAppointment = await appointmentModule.createAppointment(
+      firstCustomer,
+      appointmentInput(date, '09:00', 'guilherme'),
+    )
+    const otherAppointment = await appointmentModule.createAppointment(
+      secondCustomer,
+      appointmentInput(date, '09:00', 'vitor'),
+    )
+    await createBarberStaff('guilherme')
+
+    const appointments = await adminAppointmentModule.getAdminAppointments(date, 'vitor')
+    expect(appointments.map((appointment) => appointment.id)).toEqual([ownAppointment])
+
+    await expect(
+      adminAppointmentModule.updateAdminAppointmentStatus(otherAppointment, 'concluido'),
+    ).rejects.toMatchObject({ status: 404 })
+    await expect(
+      adminAppointmentModule.updateAdminAppointmentStatus(ownAppointment, 'concluido'),
+    ).resolves.toBe(true)
+  })
+
+  it('mantém para o administrador a visão global e o filtro por barbeiro', async () => {
+    const firstCustomer = await createCustomer('admin-a')
+    const secondCustomer = await createCustomer('admin-b')
+    const date = findNextOpenDate()
+    const firstAppointment = await appointmentModule.createAppointment(
+      firstCustomer,
+      appointmentInput(date, '10:00', 'guilherme'),
+    )
+    const secondAppointment = await appointmentModule.createAppointment(
+      secondCustomer,
+      appointmentInput(date, '10:00', 'vitor'),
+    )
+    await activateStaffSession(staffUserId)
+
+    await expect(adminAppointmentModule.getAdminAppointments(date)).resolves.toHaveLength(2)
+    await expect(
+      adminAppointmentModule.getAdminAppointments(date, 'vitor'),
+    ).resolves.toMatchObject([{ id: secondAppointment }])
+    await expect(
+      adminAppointmentModule.updateAdminAppointmentStatus(firstAppointment, 'concluido'),
+    ).resolves.toBe(true)
+  })
+
+  it('isola os bloqueios do barbeiro e mantém bloqueios gerais somente para leitura', async () => {
+    const barberStaffId = await createBarberStaff('guilherme')
+    const date = findNextOpenDate()
+    const globalBlockId = randomUUID()
+    const ownAdminBlockId = randomUUID()
+    const otherBlockId = randomUUID()
+    await applicationPool.execute<ResultSetHeader>(
+      `INSERT INTO schedule_blocks
+        (id, barber_id, block_date, start_time, end_time, reason, created_by)
+       VALUES
+        (?, NULL, ?, NULL, NULL, 'Fechamento geral', ?),
+        (?, 'guilherme', ?, '09:00:00', '10:00:00', 'Bloqueio do chefe', ?),
+        (?, 'vitor', ?, NULL, NULL, 'Folga do colega', ?)`,
+      [
+        globalBlockId,
+        date,
+        staffUserId,
+        ownAdminBlockId,
+        date,
+        staffUserId,
+        otherBlockId,
+        date,
+        staffUserId,
+      ],
+    )
+
+    const visibleBlocks = await adminScheduleBlockModule.getAdminScheduleBlocks()
+    expect(visibleBlocks.map((block) => block.id).sort()).toEqual(
+      [globalBlockId, ownAdminBlockId].sort(),
+    )
+    expect(visibleBlocks.every((block) => !block.canDelete)).toBe(true)
+
+    const personalDate = addDaysToIsoDate(date, 1)
+    const created = await adminScheduleBlockModule.createAdminScheduleBlock({
+      barberId: 'vitor',
+      date: personalDate,
+      fullDay: true,
+      reason: 'Compromisso pessoal',
+    })
+    expect(created).toMatchObject({ barberId: 'guilherme', canDelete: true })
+
+    await expect(
+      adminScheduleBlockModule.deleteAdminScheduleBlock(globalBlockId),
+    ).rejects.toMatchObject({ status: 404 })
+    await expect(
+      adminScheduleBlockModule.deleteAdminScheduleBlock(ownAdminBlockId),
+    ).rejects.toMatchObject({ status: 404 })
+    await expect(
+      adminScheduleBlockModule.deleteAdminScheduleBlock(created.id),
+    ).resolves.toBeUndefined()
+
+    const [rows] = await applicationPool.execute<CountRow[]>(
+      'SELECT COUNT(*) AS total FROM schedule_blocks WHERE created_by = ?',
+      [barberStaffId],
+    )
+    expect(rows[0].total).toBe(0)
+  })
+
+  it('impede duas contas vinculadas ao mesmo barbeiro', async () => {
+    await applicationPool.execute<ResultSetHeader>(
+      `INSERT INTO staff_users (id, name, email, password_hash, role, barber_id, is_active)
+       VALUES (?, 'Primeiro acesso', 'first@example.test', 'scrypt:test', 'barber', 'guilherme', TRUE)`,
+      [randomUUID()],
+    )
+
+    await expect(
+      applicationPool.execute<ResultSetHeader>(
+        `INSERT INTO staff_users (id, name, email, password_hash, role, barber_id, is_active)
+         VALUES (?, 'Segundo acesso', 'second@example.test', 'scrypt:test', 'barber', 'guilherme', TRUE)`,
+        [randomUUID()],
+      ),
+    ).rejects.toMatchObject({ code: 'ER_DUP_ENTRY' })
+  })
+
+  it('permite ao chefe criar um acesso vinculado para o barbeiro', async () => {
+    const adminPassword = 'SenhaDoChefe123'
+    const barberPassword = 'SenhaDoBarbeiro123'
+    await applicationPool.execute<ResultSetHeader>(
+      'UPDATE staff_users SET password_hash = ? WHERE id = ?',
+      [await authModule.hashPassword(adminPassword), staffUserId],
+    )
+    await activateStaffSession(staffUserId)
+
+    const account = await adminUserModule.createStaffAccount({
+      name: 'Guilherme Agenda',
+      email: 'guilherme-access@example.test',
+      password: barberPassword,
+      role: 'barber',
+      barberId: 'guilherme',
+      currentPassword: adminPassword,
+    })
+    expect(account).toMatchObject({
+      role: 'barber',
+      barberId: 'guilherme',
+      barberName: 'Matheus Guilherme',
+      isActive: true,
+    })
+
+    staffCookies.clear()
+    await expect(
+      adminAuthModule.authenticateStaff('guilherme-access@example.test', barberPassword),
+    ).resolves.toBe('barber')
+  })
+
+  it('recusa o barbeiro nas áreas exclusivas do administrador', async () => {
+    await createBarberStaff('guilherme')
+
+    await expect(adminServiceModule.getAdminServices()).rejects.toMatchObject({ status: 403 })
+    await expect(adminBarberModule.getAdminBarbers()).rejects.toMatchObject({ status: 403 })
+    await expect(adminBusinessModule.getAdminBusinessConfiguration()).rejects.toMatchObject({
+      status: 403,
+    })
+    await expect(adminUserModule.getStaffAccounts()).rejects.toMatchObject({ status: 403 })
+  })
+
+  it('invalida a sessão do barbeiro quando o perfil é desativado', async () => {
+    await createBarberStaff('guilherme')
+    const barberToken = staffCookies.get('gui_santos_staff_session')
+    expect(barberToken).toBeTruthy()
+
+    await activateStaffSession(staffUserId)
+    const adminToken = staffCookies.get('gui_santos_staff_session')
+    const barber = (await adminBarberModule.getAdminBarbers()).find(
+      (candidate) => candidate.id === 'guilherme',
+    )
+    expect(barber).toBeTruthy()
+
+    await adminBarberModule.updateAdminBarber('guilherme', {
+      ...barber,
+      isActive: false,
+    })
+
+    staffCookies.set('gui_santos_staff_session', barberToken!)
+    await expect(adminAuthModule.getAuthenticatedStaff()).resolves.toBeNull()
+
+    staffCookies.set('gui_santos_staff_session', adminToken!)
+    await adminBarberModule.updateAdminBarber('guilherme', {
+      ...barber,
+      isActive: true,
+    })
+
+    staffCookies.set('gui_santos_staff_session', barberToken!)
+    await expect(adminAuthModule.getAuthenticatedStaff()).resolves.toBeNull()
   })
 })

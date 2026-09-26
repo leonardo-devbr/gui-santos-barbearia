@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
-import { getAuthenticatedAdmin } from '@/lib/admin-auth'
+import { getAuthenticatedStaff } from '@/lib/admin-auth'
 import { errorResponse, internalErrorResponse, readJsonObject } from '@/lib/api'
-import { AdminUserError, createAdminUser } from '@/lib/admin-users'
+import { AdminUserError, createStaffAccount } from '@/lib/admin-users'
 import {
   consumeRateLimits,
   getClientIdentifier,
@@ -13,8 +13,9 @@ export async function POST(request: Request) {
   if (!body) return errorResponse('Envie os dados do administrador em JSON.', 400)
 
   try {
-    const admin = await getAuthenticatedAdmin()
+    const admin = await getAuthenticatedStaff()
     if (!admin) return errorResponse('Acesso administrativo não autorizado.', 401)
+    if (admin.role !== 'admin') return errorResponse('Acesso administrativo necessário.', 403)
 
     const rateLimit = await consumeRateLimits([
       {
@@ -32,8 +33,8 @@ export async function POST(request: Request) {
     ])
     if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
 
-    const user = await createAdminUser(body)
-    return NextResponse.json({ user, message: 'Administrador criado com sucesso.' }, { status: 201 })
+    const user = await createStaffAccount(body)
+    return NextResponse.json({ user, message: 'Acesso criado com sucesso.' }, { status: 201 })
   } catch (error) {
     if (error instanceof AdminUserError) return errorResponse(error.message, error.status)
     return internalErrorResponse(error)

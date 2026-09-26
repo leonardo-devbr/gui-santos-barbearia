@@ -59,7 +59,7 @@ export function AdminLoginForm() {
     <form onSubmit={handleSubmit} className="flex flex-col gap-6" noValidate>
       <FieldGroup>
         <Field>
-          <FieldLabel htmlFor="admin-email">E-mail administrativo</FieldLabel>
+          <FieldLabel htmlFor="admin-email">E-mail da equipe</FieldLabel>
           <Input
             id="admin-email"
             name="email"
@@ -90,7 +90,7 @@ export function AdminLoginForm() {
 
       <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
         {isSubmitting && <LoaderCircle className="animate-spin" aria-hidden="true" />}
-        {isSubmitting ? 'Entrando...' : 'Entrar no painel'}
+        {isSubmitting ? 'Entrando...' : 'Entrar no painel da equipe'}
       </Button>
     </form>
   )

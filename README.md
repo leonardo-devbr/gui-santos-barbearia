@@ -1,6 +1,6 @@
 # Gui Santos Barbearia
 
-Site, área do cliente e painel administrativo para a gestão de horários da Gui Santos Barbearia.
+Site, área do cliente e painel da equipe para a gestão de horários da Gui Santos Barbearia.
 
 ## Tecnologias
 
@@ -102,7 +102,7 @@ npm run admin:create
 
 O comando pode ser repetido para atualizar o nome ou a senha do mesmo e-mail. Depois da criação, remova `ADMIN_PASSWORD` do `.env.local`; a senha já estará armazenada no MySQL somente como hash.
 
-Não existe cadastro público de administradores. Cada ambiente local ou servidor precisa executar esse comando ao menos uma vez para obter acesso ao painel.
+Não existe cadastro público para a equipe. Cada ambiente local ou servidor precisa executar esse comando ao menos uma vez para criar o primeiro administrador. Depois, ele pode abrir **Acessos** no painel e criar uma conta vinculada para cada barbeiro.
 
 ### 7. Configurar e-mails e lembretes (opcional localmente)
 
@@ -140,7 +140,7 @@ CRON_SECRET="valor-aleatorio-gerado"
 npm run dev
 ```
 
-Abra [http://localhost:3000](http://localhost:3000). O painel usa um login separado em [http://localhost:3000/admin/login](http://localhost:3000/admin/login). Para encerrar o servidor, volte ao terminal e pressione `Ctrl + C`.
+Abra [http://localhost:3000](http://localhost:3000). O painel da equipe usa um login separado em [http://localhost:3000/admin/login](http://localhost:3000/admin/login). Para encerrar o servidor, volte ao terminal e pressione `Ctrl + C`.
 
 ### 9. Processar lembretes e novas tentativas
 
@@ -220,7 +220,7 @@ npm run build
 
 ## Estado da integração
 
-O backend usa Route Handlers do Next.js e MySQL. Cadastro, login, logout, perfil, catálogo, disponibilidade, criação, remarcação, cancelamento e histórico de agendamentos estão conectados ao banco. O painel administrativo também usa o MySQL para autenticação da equipe, indicadores, agenda diária, bloqueios, catálogo, equipe e configurações do estabelecimento.
+O backend usa Route Handlers do Next.js e MySQL. Cadastro, login, logout, perfil, catálogo, disponibilidade, criação, remarcação, cancelamento e histórico de agendamentos estão conectados ao banco. O painel também usa o MySQL para autenticação da equipe, indicadores, agenda diária, bloqueios, catálogo, profissionais e configurações do estabelecimento. Administradores possuem visão global; cada barbeiro acessa somente a agenda vinculada à própria conta.
 
 As senhas usam derivação `scrypt` e novas senhas exigem ao menos 12 caracteres, uma letra e um número. Uma conta só pode entrar depois de comprovar a posse do e-mail. Sessões e tokens de recuperação ou confirmação ficam no MySQL somente como hashes, enquanto o navegador recebe apenas um cookie de sessão `HttpOnly`, `SameSite=Lax` e seguro em produção. Sessões antigas são limitadas e rotacionadas durante novos logins. A confirmação de um horário ocorre dentro de uma transação que bloqueia os recursos necessários e verifica novamente qualquer sobreposição.
 
@@ -229,7 +229,7 @@ Recuperação de senha, verificação de endereço, confirmação, remarcação,
 As notificações de agendamento são registradas em uma fila no MySQL. Uma indisponibilidade do provedor de e-mail não desfaz o agendamento: a mensagem fica marcada como falha e o processador pode tentar novamente até três vezes.
 O processador também elimina, em lotes, notificações concluídas ou abandonadas há mais de 90 dias, evitando manter indefinidamente destinatários e cópias do conteúdo enviado.
 
-A API rejeita origens incompatíveis em operações que alteram dados, limita o corpo JSON, aplica limites de tentativas em autenticação e agenda e envia cabeçalhos de segurança no navegador. Trocar o e-mail do cliente ou gerenciar contas administrativas exige confirmar a senha atual.
+A API rejeita origens incompatíveis em operações que alteram dados, limita o corpo JSON, aplica limites de tentativas em autenticação e agenda e envia cabeçalhos de segurança no navegador. Trocar o e-mail do cliente ou gerenciar acessos da equipe exige confirmar a senha atual do administrador.
 
 Todas as requisições e respostas usam JSON. Em erros, a API responde com um status HTTP adequado e, sempre que possível, com este formato:
 
@@ -290,15 +290,15 @@ A disponibilidade exibida no navegador é apenas informativa. Ao criar ou remarc
 
 Essa rota é destinada ao agendador do servidor e nunca deve ser chamada a partir do navegador do cliente. Repetir a execução não duplica os lembretes já criados.
 
-### Administração
+### Painel da equipe
 
-Clientes e administradores possuem contas, sessões, cookies e telas de login independentes. As rotas abaixo exigem uma sessão administrativa válida:
+Clientes e membros da equipe possuem contas, sessões, cookies e telas de login independentes. As rotas de agenda e bloqueios aceitam administradores e barbeiros autenticados; as demais continuam exclusivas dos administradores.
 
 | Método | Rota | Corpo | Comportamento |
 | --- | --- | --- | --- |
-| `POST` | `/api/admin/auth/login` | `{ "email", "password" }` | Inicia uma sessão administrativa. |
-| `POST` | `/api/admin/auth/logout` | Sem corpo | Encerra a sessão administrativa. |
-| `GET` | `/api/admin/appointments?date=YYYY-MM-DD` | Sem corpo | Lista a agenda completa da data, incluindo os dados do cliente. |
+| `POST` | `/api/admin/auth/login` | `{ "email", "password" }` | Inicia uma sessão da equipe. |
+| `POST` | `/api/admin/auth/logout` | Sem corpo | Encerra a sessão da equipe. |
+| `GET` | `/api/admin/appointments?date=YYYY-MM-DD&barber=ID` | Sem corpo | Lista a agenda da data; o filtro é opcional para administradores e forçado para barbeiros. |
 | `PATCH` | `/api/admin/appointments/:id` | `{ "status" }` | Marca um atendimento como `concluido` ou `cancelado`. |
 | `POST` | `/api/admin/schedule-blocks` | Dados do período | Bloqueia um dia ou intervalo para um barbeiro ou toda a equipe. |
 | `DELETE` | `/api/admin/schedule-blocks/:id` | Sem corpo | Remove um bloqueio futuro. |
@@ -308,20 +308,20 @@ Clientes e administradores possuem contas, sessões, cookies e telas de login in
 | `PATCH` | `/api/admin/barbers/:id` | Dados do barbeiro | Edita ou ativa/desativa um barbeiro. |
 | `PATCH` | `/api/admin/business` | Dados do estabelecimento | Atualiza contato, endereço e localização. |
 | `PUT` | `/api/admin/business-hours` | `{ "hours": [...] }` | Atualiza os sete dias de funcionamento. |
-| `POST` | `/api/admin/users` | `{ "name", "email", "password", "currentPassword" }` | Cria outro administrador após confirmar a senha do administrador atual. |
-| `PATCH` | `/api/admin/users/:id` | Dados da conta e `currentPassword` | Edita, redefine a senha ou desativa um administrador após confirmar a senha atual. |
+| `POST` | `/api/admin/users` | `{ "name", "email", "password", "role", "barberId", "currentPassword" }` | Cria um administrador ou acesso vinculado a um barbeiro. |
+| `PATCH` | `/api/admin/users/:id` | Dados da conta e `currentPassword` | Edita, redefine a senha, vincula ou suspende um acesso da equipe. |
 
 No navegador, o painel possui as seguintes áreas:
 
-- `/admin`: indicadores e agenda de hoje;
-- `/admin/agendamentos`: consulta da agenda por data;
-- `/admin/bloqueios`: folgas, pausas, feriados e indisponibilidades;
+- `/admin`: indicadores e agenda de hoje, globais para o administrador e próprios para o barbeiro;
+- `/admin/agendamentos`: consulta da agenda por data e, para o administrador, por barbeiro;
+- `/admin/bloqueios`: folgas, pausas, feriados e indisponibilidades; barbeiros gerenciam somente os próprios bloqueios;
 - `/admin/servicos`: serviços, preços, duração e disponibilidade;
 - `/admin/barbeiros`: perfis e disponibilidade da equipe;
 - `/admin/configuracoes`: contato, endereço, mapa e horários de funcionamento;
-- `/admin/administradores`: contas administrativas e redefinição de acesso.
+- `/admin/administradores`: acessos de administradores e barbeiros, disponível somente ao administrador.
 
-Serviços e barbeiros são desativados, não apagados, preservando o histórico dos agendamentos. Horários e bloqueios são validados novamente pelo backend ao criar ou remarcar uma reserva. O administrador atual não pode desativar a própria conta, e a troca de senha invalida sessões anteriores.
+Serviços e barbeiros são desativados, não apagados, preservando o histórico dos agendamentos. Horários e bloqueios são validados novamente pelo backend ao criar ou remarcar uma reserva. Cada barbeiro possui no máximo uma conta vinculada e não consegue consultar nem alterar a agenda de outro profissional. O administrador atual não pode desativar ou rebaixar a própria conta; trocar senha, papel ou vínculo invalida as sessões anteriores.
 
 ### Perfil
 
@@ -356,7 +356,7 @@ Ao solicitar a troca do e-mail, envie também `currentPassword`. O endereço atu
 - Normalizar e garantir a unicidade do e-mail.
 - Validar todos os payloads também no servidor; a validação do navegador é apenas de experiência de uso.
 - Exigir autenticação nas rotas de perfil, disponibilidade privada e agendamentos.
-- Manter autenticação e cookies administrativos separados das contas dos clientes.
+- Manter autenticação e cookies da equipe separados das contas dos clientes.
 - Impedir reservas que coincidam com bloqueios administrativos de agenda.
 - Proteger o processador de notificações com um segredo exclusivo do ambiente.
 - Verificar se o agendamento pertence ao cliente antes de remarcar ou cancelar.
