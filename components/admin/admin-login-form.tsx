@@ -77,6 +77,7 @@ export function AdminLoginForm() {
             id="admin-password"
             name="password"
             autoComplete="current-password"
+            placeholder="Digite sua senha"
             required
           />
         </Field>

@@ -1,5 +1,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
+import { ArrowLeft } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 interface AuthShellProps {
   children: React.ReactNode
@@ -29,10 +31,24 @@ export function AuthShell({ children }: AuthShellProps) {
 
       <div className="flex flex-col items-center justify-center px-6 py-16">
         <div className="flex w-full max-w-sm flex-col gap-8">
-          <Link href="/" className="flex flex-col items-center gap-1 text-center lg:items-start lg:text-left">
-            <span className="font-serif text-2xl tracking-wide text-foreground">GUI SANTOS</span>
-            <span className="text-xs font-medium tracking-[0.3em] text-primary">BARBEARIA</span>
-          </Link>
+          <div className="flex flex-col gap-5">
+            <Button
+              render={<Link href="/" />}
+              nativeButton={false}
+              variant="ghost"
+              className="w-fit px-0 text-muted-foreground hover:bg-transparent hover:text-primary"
+            >
+              <ArrowLeft aria-hidden="true" />
+              Voltar para o site
+            </Button>
+            <Link
+              href="/"
+              className="flex flex-col items-center gap-1 text-center lg:items-start lg:text-left"
+            >
+              <span className="font-serif text-2xl tracking-wide text-foreground">GUI SANTOS</span>
+              <span className="text-xs font-medium tracking-[0.3em] text-primary">BARBEARIA</span>
+            </Link>
+          </div>
           {children}
         </div>
       </div>

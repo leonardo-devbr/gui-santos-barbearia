@@ -1,5 +1,4 @@
 import type { Metadata } from 'next'
-import Link from 'next/link'
 import { ShieldCheck } from 'lucide-react'
 import { AdminLoginForm } from '@/components/admin/admin-login-form'
 import { AuthShell } from '@/components/auth-shell'
@@ -25,10 +24,6 @@ export default function AdminLoginPage() {
       </div>
 
       <AdminLoginForm />
-
-      <Link href="/" className="text-center text-sm text-muted-foreground hover:text-primary">
-        Voltar para o site
-      </Link>
     </AuthShell>
   )
 }
