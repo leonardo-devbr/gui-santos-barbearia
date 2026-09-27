@@ -171,9 +171,9 @@ CREATE TABLE IF NOT EXISTS appointments (
   barber_id VARCHAR(64) NOT NULL,
   appointment_date DATE NOT NULL,
   appointment_time TIME NOT NULL,
-  status ENUM('confirmado', 'pendente', 'concluido', 'cancelado') NOT NULL DEFAULT 'confirmado',
+  status ENUM('confirmado', 'concluido', 'cancelado') NOT NULL DEFAULT 'confirmado',
   active_slot BOOLEAN GENERATED ALWAYS AS (
-    IF(status IN ('confirmado', 'pendente'), TRUE, NULL)
+    IF(status = 'confirmado', TRUE, NULL)
   ) STORED,
   price DECIMAL(10, 2) UNSIGNED NOT NULL,
   duration_minutes SMALLINT UNSIGNED NOT NULL,

@@ -25,7 +25,7 @@ function getFutureParameters() {
 }
 
 const activeFutureClause = `
-  appointments.status IN ('confirmado', 'pendente')
+  appointments.status = 'confirmado'
   AND (
     appointments.appointment_date > ?
     OR (

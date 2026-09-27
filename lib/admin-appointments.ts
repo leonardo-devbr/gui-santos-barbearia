@@ -2,7 +2,7 @@ import 'server-only'
 
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { getAuthenticatedStaff } from '@/lib/admin-auth'
-import { getTodayInSaoPaulo } from '@/lib/date'
+import { getNowInSaoPaulo, getTodayInSaoPaulo } from '@/lib/date'
 import { getPool, withTransaction } from '@/lib/db'
 import type { AdminAppointment, AppointmentStatus } from '@/lib/types'
 
@@ -25,6 +25,8 @@ interface AdminAppointmentRow extends RowDataPacket {
 interface AppointmentStatusRow extends RowDataPacket {
   status: AppointmentStatus
   barber_id: string
+  appointment_date: string
+  appointment_time: string
 }
 
 interface DashboardRow extends RowDataPacket {
@@ -61,7 +63,19 @@ async function requireStaffAccess() {
   return staff
 }
 
-function mapAppointment(row: AdminAppointmentRow): AdminAppointment {
+function hasAppointmentStarted(
+  date: string,
+  time: string,
+  now: { date: string; time: string },
+) {
+  return date < now.date || (date === now.date && time.slice(0, 5) <= now.time)
+}
+
+function mapAppointment(
+  row: AdminAppointmentRow,
+  now: { date: string; time: string },
+): AdminAppointment {
+  const isConfirmed = row.status === 'confirmado'
   return {
     id: row.id,
     serviceId: row.service_id,
@@ -76,6 +90,9 @@ function mapAppointment(row: AdminAppointmentRow): AdminAppointment {
     status: row.status,
     price: row.price,
     durationMinutes: row.duration_minutes,
+    canComplete:
+      isConfirmed && hasAppointmentStarted(row.appointment_date, row.appointment_time, now),
+    canCancel: isConfirmed,
   }
 }
 
@@ -116,14 +133,25 @@ export async function getAdminAppointments(
     parameters,
   )
 
-  return rows.map(mapAppointment)
+  const now = getNowInSaoPaulo()
+  return rows.map((row) => mapAppointment(row, now))
 }
 
 export async function getAdminDashboardMetrics(): Promise<AdminDashboardMetrics> {
   const staff = await requireStaffAccess()
-  const today = getTodayInSaoPaulo()
+  const now = getNowInSaoPaulo()
+  const today = now.date
   const barberClause = staff.role === 'barber' ? 'WHERE barber_id = ?' : ''
-  const parameters: string[] = [today, today, today, today, today, today]
+  const parameters: string[] = [
+    today,
+    today,
+    today,
+    today,
+    today,
+    `${now.time}:00`,
+    today,
+    today,
+  ]
   if (staff.role === 'barber') parameters.push(staff.barberId!)
 
   const [rows] = await getPool().execute<DashboardRow[]>(
@@ -132,9 +160,9 @@ export async function getAdminDashboardMetrics(): Promise<AdminDashboardMetrics>
       SUM(appointment_date = ? AND status = 'concluido') AS completed_today,
       SUM(appointment_date = ? AND status = 'cancelado') AS cancelled_today,
       SUM(
-        appointment_date >= ?
+        (appointment_date > ? OR (appointment_date = ? AND appointment_time > ?))
         AND appointment_date < DATE_ADD(?, INTERVAL 7 DAY)
-        AND status IN ('confirmado', 'pendente')
+        AND status = 'confirmado'
       ) AS upcoming_week,
       COALESCE(SUM(IF(appointment_date = ? AND status = 'concluido', price, 0)), 0) AS revenue_today
     FROM appointments
@@ -162,7 +190,7 @@ export async function updateAdminAppointmentStatus(
     const barberClause = staff.role === 'barber' ? 'AND barber_id = ?' : ''
     const parameters = staff.role === 'barber' ? [appointmentId, staff.barberId!] : [appointmentId]
     const [rows] = await connection.execute<AppointmentStatusRow[]>(
-      `SELECT status, barber_id
+      `SELECT status, barber_id, appointment_date, appointment_time
        FROM appointments
        WHERE id = ? ${barberClause}
        LIMIT 1
@@ -175,6 +203,19 @@ export async function updateAdminAppointmentStatus(
     if (appointment.status === nextStatus) return false
     if (appointment.status === 'concluido' || appointment.status === 'cancelado') {
       throw new AdminAppointmentError('Este atendimento já foi finalizado.', 409)
+    }
+    if (
+      nextStatus === 'concluido' &&
+      !hasAppointmentStarted(
+        appointment.appointment_date,
+        appointment.appointment_time,
+        getNowInSaoPaulo(),
+      )
+    ) {
+      throw new AdminAppointmentError(
+        'O atendimento só pode ser concluído depois do horário de início.',
+        409,
+      )
     }
 
     await connection.execute<ResultSetHeader>('UPDATE appointments SET status = ? WHERE id = ?', [

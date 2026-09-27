@@ -165,10 +165,10 @@ export async function getAppointments(customerId: string, scope: 'upcoming' | 'h
     scope === 'history'
       ? `(appointments.status IN ('concluido', 'cancelado')
          OR appointments.appointment_date < ?
-         OR (appointments.appointment_date = ? AND appointments.appointment_time < ?))`
-      : `appointments.status IN ('confirmado', 'pendente')
+         OR (appointments.appointment_date = ? AND appointments.appointment_time <= ?))`
+      : `appointments.status = 'confirmado'
          AND (appointments.appointment_date > ?
-         OR (appointments.appointment_date = ? AND appointments.appointment_time >= ?))`
+         OR (appointments.appointment_date = ? AND appointments.appointment_time > ?))`
   const direction = scope === 'history' ? 'DESC' : 'ASC'
 
   const [rows] = await getPool().execute<AppointmentRow[]>(
@@ -191,18 +191,7 @@ export async function getAppointments(customerId: string, scope: 'upcoming' | 'h
     [customerId, now.date, now.date, `${now.time}:00`],
   )
 
-  return rows.map((row) => {
-    const appointment = mapAppointment(row)
-    const isPast =
-      appointment.date < now.date ||
-      (appointment.date === now.date && appointment.time < now.time)
-
-    if (scope === 'history' && isPast && appointment.status === 'confirmado') {
-      appointment.status = 'concluido'
-    }
-
-    return appointment
-  })
+  return rows.map(mapAppointment)
 }
 
 export async function getAvailability({
@@ -269,7 +258,7 @@ export async function getAvailability({
        FROM appointments
        WHERE barber_id = ?
          AND appointment_date = ?
-         AND status IN ('confirmado', 'pendente')
+         AND status = 'confirmado'
          ${exclusionClause}`,
       parameters,
     ),
@@ -366,7 +355,7 @@ async function ensureNoConflict(
      FROM appointments
      WHERE barber_id = ?
        AND appointment_date = ?
-       AND status IN ('confirmado', 'pendente')
+       AND status = 'confirmado'
        AND TIME_TO_SEC(appointment_time) < TIME_TO_SEC(?) + ? * 60
        AND TIME_TO_SEC(appointment_time) + duration_minutes * 60 > TIME_TO_SEC(?)
        ${exclusionClause}
@@ -406,7 +395,7 @@ async function ensureCustomerHasNoConflict(
      FROM appointments
      WHERE customer_id = ?
        AND appointment_date = ?
-       AND status IN ('confirmado', 'pendente')
+       AND status = 'confirmado'
        AND TIME_TO_SEC(appointment_time) < TIME_TO_SEC(?) + ? * 60
        AND TIME_TO_SEC(appointment_time) + duration_minutes * 60 > TIME_TO_SEC(?)
        ${exclusionClause}
@@ -464,8 +453,8 @@ export async function createAppointment(customerId: string, input: AppointmentIn
       `SELECT COUNT(*) AS total
        FROM appointments
        WHERE customer_id = ?
-         AND status IN ('confirmado', 'pendente')
-         AND (appointment_date > ? OR (appointment_date = ? AND appointment_time >= ?))`,
+         AND status = 'confirmado'
+         AND (appointment_date > ? OR (appointment_date = ? AND appointment_time > ?))`,
       [customerId, now.date, now.date, `${now.time}:00`],
     )
     if ((countRows[0]?.total ?? 0) >= MAX_ACTIVE_APPOINTMENTS) {
@@ -573,7 +562,7 @@ export async function cancelAppointment(customerId: string, appointmentId: strin
      SET status = 'cancelado'
      WHERE id = ?
        AND customer_id = ?
-       AND status IN ('confirmado', 'pendente')
+       AND status = 'confirmado'
        AND (appointment_date > ? OR (appointment_date = ? AND appointment_time > ?))`,
     [appointmentId, customerId, now.date, now.date, `${now.time}:00`],
   )

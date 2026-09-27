@@ -280,6 +280,25 @@ async function migrateStaffUserBarberAccess() {
   ])
 }
 
+async function removePendingAppointmentStatus() {
+  const migrationName = '20260925_remove_pending_appointment_status'
+  if (await hasSchemaMigration(migrationName)) return
+
+  await databaseConnection.query(
+    "UPDATE appointments SET status = 'confirmado' WHERE status = 'pendente'",
+  )
+  await databaseConnection.query(
+    `ALTER TABLE appointments
+     MODIFY COLUMN status ENUM('confirmado', 'concluido', 'cancelado') NOT NULL DEFAULT 'confirmado',
+     MODIFY COLUMN active_slot BOOLEAN GENERATED ALWAYS AS (
+       IF(status = 'confirmado', TRUE, NULL)
+     ) STORED`,
+  )
+  await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+    migrationName,
+  ])
+}
+
 try {
   await databaseConnection.query(schema)
   await migrateCustomerEmailVerification()
@@ -287,6 +306,7 @@ try {
   await removeLegacyCustomerLoyalty()
   await removeLegacyCustomerPhoto()
   await migrateStaffUserBarberAccess()
+  await removePendingAppointmentStatus()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {
   await databaseConnection.end()

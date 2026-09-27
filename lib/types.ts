@@ -28,7 +28,7 @@ export interface AdminBarber extends Barber {
   isActive: boolean
 }
 
-export type AppointmentStatus = 'confirmado' | 'pendente' | 'concluido' | 'cancelado'
+export type AppointmentStatus = 'confirmado' | 'concluido' | 'cancelado'
 
 export interface Appointment {
   id: string
@@ -47,6 +47,8 @@ export interface AdminAppointment extends Appointment {
   customerName: string
   customerPhone: string
   customerEmail: string
+  canComplete: boolean
+  canCancel: boolean
 }
 
 export interface ScheduleBlock {

@@ -7,10 +7,6 @@ const statusConfig: Record<AppointmentStatus, { label: string; className: string
     label: 'Confirmado',
     className: 'bg-success/15 text-success border-success/30',
   },
-  pendente: {
-    label: 'Pendente',
-    className: 'bg-primary/15 text-primary border-primary/30',
-  },
   concluido: {
     label: 'Concluído',
     className: 'bg-muted text-muted-foreground border-border',

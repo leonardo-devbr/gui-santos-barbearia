@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { CheckCircle2, Clock, LoaderCircle, Mail, Phone, Scissors, UserRound, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { StatusBadge } from '@/components/status-badge'
@@ -16,6 +17,7 @@ interface ApiResponse {
 }
 
 export function AdminAppointmentsList({ initial }: { initial: AdminAppointment[] }) {
+  const router = useRouter()
   const [appointments, setAppointments] = useState(initial)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
 
@@ -23,7 +25,15 @@ export function AdminAppointmentsList({ initial }: { initial: AdminAppointment[]
     appointment: AdminAppointment,
     status: Extract<AppointmentStatus, 'concluido' | 'cancelado'>,
   ) {
-    if (status === 'cancelado' && !window.confirm('Cancelar este agendamento?')) return
+    const isNoShow = status === 'cancelado' && appointment.canComplete
+    if (
+      status === 'cancelado' &&
+      !window.confirm(
+        isNoShow ? 'Marcar este atendimento como não realizado?' : 'Cancelar este agendamento?',
+      )
+    ) {
+      return
+    }
 
     setUpdatingId(appointment.id)
 
@@ -42,9 +52,20 @@ export function AdminAppointmentsList({ initial }: { initial: AdminAppointment[]
       }
 
       setAppointments((current) =>
-        current.map((item) => (item.id === appointment.id ? { ...item, status } : item)),
+        current.map((item) =>
+          item.id === appointment.id
+            ? { ...item, status, canComplete: false, canCancel: false }
+            : item,
+        ),
       )
-      toast.success(status === 'concluido' ? 'Atendimento concluído.' : 'Agendamento cancelado.')
+      toast.success(
+        status === 'concluido'
+          ? 'Atendimento concluído.'
+          : isNoShow
+            ? 'Atendimento marcado como não realizado.'
+            : 'Agendamento cancelado.',
+      )
+      router.refresh()
     } catch {
       toast.error('Não foi possível conectar ao servidor.')
     } finally {
@@ -70,7 +91,7 @@ export function AdminAppointmentsList({ initial }: { initial: AdminAppointment[]
     <div className="flex flex-col gap-3">
       {appointments.map((appointment) => {
         const isUpdating = updatingId === appointment.id
-        const isOpen = appointment.status === 'confirmado' || appointment.status === 'pendente'
+        const hasActions = appointment.canComplete || appointment.canCancel
 
         return (
           <Card key={appointment.id}>
@@ -114,27 +135,31 @@ export function AdminAppointmentsList({ initial }: { initial: AdminAppointment[]
 
               <div className="flex flex-wrap items-center gap-2 lg:max-w-48 lg:justify-end">
                 <StatusBadge status={appointment.status} />
-                {isOpen && (
+                {hasActions && (
                   <>
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => void updateStatus(appointment, 'concluido')}
-                      disabled={Boolean(updatingId)}
-                    >
-                      {isUpdating ? <LoaderCircle className="animate-spin" /> : <CheckCircle2 />}
-                      Concluir
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => void updateStatus(appointment, 'cancelado')}
-                      disabled={Boolean(updatingId)}
-                    >
-                      <XCircle />
-                      Cancelar
-                    </Button>
+                    {appointment.canComplete && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void updateStatus(appointment, 'concluido')}
+                        disabled={Boolean(updatingId)}
+                      >
+                        {isUpdating ? <LoaderCircle className="animate-spin" /> : <CheckCircle2 />}
+                        Concluir
+                      </Button>
+                    )}
+                    {appointment.canCancel && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void updateStatus(appointment, 'cancelado')}
+                        disabled={Boolean(updatingId)}
+                      >
+                        <XCircle />
+                        {appointment.canComplete ? 'Não realizado' : 'Cancelar'}
+                      </Button>
+                    )}
                   </>
                 )}
               </div>

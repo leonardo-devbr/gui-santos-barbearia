@@ -54,6 +54,12 @@ interface BarberActiveRow extends RowDataPacket {
   is_active: number | boolean
 }
 
+interface SchemaColumnRow extends RowDataPacket {
+  columnName: string
+  columnType: string
+  generationExpression: string
+}
+
 const TEST_DATABASE_PREFIX = 'gui_santos_barbearia_test_'
 const testDatabase = `${TEST_DATABASE_PREFIX}${process.pid}_${randomBytes(4).toString('hex')}`
 const testDatabasePattern = /^gui_santos_barbearia_test_\d+_[a-f0-9]{8}$/
@@ -103,6 +109,18 @@ function findNextOpenDate() {
   }
 
   throw new Error('Não foi possível encontrar um dia de atendimento para o teste.')
+}
+
+function findPreviousOpenDate() {
+  let date = addDaysToIsoDate(getTodayInSaoPaulo(), -1)
+
+  for (let attempt = 0; attempt < 7; attempt += 1) {
+    const weekday = new Date(`${date}T12:00:00.000Z`).getUTCDay()
+    if (weekday >= 2 && weekday <= 6) return date
+    date = addDaysToIsoDate(date, -1)
+  }
+
+  throw new Error('Não foi possível encontrar um dia anterior de atendimento para o teste.')
 }
 
 function getDefaultBusinessHours() {
@@ -339,7 +357,7 @@ describe('agendamentos com MySQL', () => {
     const [countRows] = await applicationPool.execute<CountRow[]>(
       `SELECT COUNT(*) AS total FROM appointments
        WHERE barber_id = 'guilherme' AND appointment_date = ?
-         AND status IN ('confirmado', 'pendente')`,
+         AND status = 'confirmado'`,
       [date],
     )
     expect(countRows[0].total).toBe(1)
@@ -361,7 +379,7 @@ describe('agendamentos com MySQL', () => {
     const [countRows] = await applicationPool.execute<CountRow[]>(
       `SELECT COUNT(*) AS total FROM appointments
        WHERE customer_id = ? AND appointment_date = ?
-         AND status IN ('confirmado', 'pendente')`,
+         AND status = 'confirmado'`,
       [customerId, date],
     )
     expect(countRows[0].total).toBe(1)
@@ -445,6 +463,46 @@ describe('agendamentos com MySQL', () => {
     await expect(
       appointmentModule.cancelAppointment(firstCustomer, firstAppointment),
     ).rejects.toMatchObject({ status: 409 })
+  })
+
+  it('mantém agendamento passado confirmado até a equipe finalizar', async () => {
+    const customerId = await createCustomer('finalizacao-manual')
+    const date = findPreviousOpenDate()
+    const appointmentId = randomUUID()
+    await applicationPool.execute<ResultSetHeader>(
+      `INSERT INTO appointments
+        (id, customer_id, service_id, barber_id, appointment_date, appointment_time,
+         status, price, duration_minutes)
+       VALUES (?, ?, 'corte', 'guilherme', ?, '09:00:00', 'confirmado', 40, 45)`,
+      [appointmentId, customerId, date],
+    )
+
+    const [history, upcoming] = await Promise.all([
+      appointmentModule.getAppointments(customerId, 'history'),
+      appointmentModule.getAppointments(customerId, 'upcoming'),
+    ])
+    expect(history).toMatchObject([{ id: appointmentId, status: 'confirmado' }])
+    expect(upcoming).toHaveLength(0)
+  })
+
+  it('usa somente confirmado, concluído e cancelado no esquema de agendamentos', async () => {
+    const [columns] = await applicationPool.execute<SchemaColumnRow[]>(
+      `SELECT
+         column_name AS columnName,
+         column_type AS columnType,
+         generation_expression AS generationExpression
+       FROM information_schema.columns
+       WHERE table_schema = DATABASE()
+         AND table_name = 'appointments'
+         AND column_name IN ('status', 'active_slot')`,
+    )
+    const status = columns.find((column) => column.columnName === 'status')
+    const activeSlot = columns.find((column) => column.columnName === 'active_slot')
+
+    expect(status?.columnType).toBe("enum('confirmado','concluido','cancelado')")
+    expect(activeSlot?.generationExpression).toContain('`status`')
+    expect(activeSlot?.generationExpression).toContain('confirmado')
+    expect(activeSlot?.generationExpression).not.toContain('pendente')
   })
 })
 
@@ -720,7 +778,7 @@ describe('acesso da equipe com MySQL', () => {
       adminAppointmentModule.updateAdminAppointmentStatus(otherAppointment, 'concluido'),
     ).rejects.toMatchObject({ status: 404 })
     await expect(
-      adminAppointmentModule.updateAdminAppointmentStatus(ownAppointment, 'concluido'),
+      adminAppointmentModule.updateAdminAppointmentStatus(ownAppointment, 'cancelado'),
     ).resolves.toBe(true)
   })
 
@@ -738,13 +796,52 @@ describe('acesso da equipe com MySQL', () => {
     )
     await activateStaffSession(staffUserId)
 
-    await expect(adminAppointmentModule.getAdminAppointments(date)).resolves.toHaveLength(2)
+    const appointments = await adminAppointmentModule.getAdminAppointments(date)
+    expect(appointments).toHaveLength(2)
+    expect(appointments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: firstAppointment, canComplete: false, canCancel: true }),
+      ]),
+    )
     await expect(
       adminAppointmentModule.getAdminAppointments(date, 'vitor'),
     ).resolves.toMatchObject([{ id: secondAppointment }])
     await expect(
       adminAppointmentModule.updateAdminAppointmentStatus(firstAppointment, 'concluido'),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: 'O atendimento só pode ser concluído depois do horário de início.',
+    })
+    await expect(
+      adminAppointmentModule.updateAdminAppointmentStatus(firstAppointment, 'cancelado'),
     ).resolves.toBe(true)
+  })
+
+  it('permite concluir um atendimento somente depois do horário de início', async () => {
+    const customerId = await createCustomer('conclusao-equipe')
+    const date = findPreviousOpenDate()
+    const appointmentId = randomUUID()
+    await applicationPool.execute<ResultSetHeader>(
+      `INSERT INTO appointments
+        (id, customer_id, service_id, barber_id, appointment_date, appointment_time,
+         status, price, duration_minutes)
+       VALUES (?, ?, 'corte', 'guilherme', ?, '09:00:00', 'confirmado', 40, 45)`,
+      [appointmentId, customerId, date],
+    )
+    await activateStaffSession(staffUserId)
+
+    await expect(adminAppointmentModule.getAdminAppointments(date)).resolves.toMatchObject([
+      { id: appointmentId, canComplete: true, canCancel: true },
+    ])
+    await expect(
+      adminAppointmentModule.updateAdminAppointmentStatus(appointmentId, 'concluido'),
+    ).resolves.toBe(true)
+
+    const [rows] = await applicationPool.execute<AppointmentDatabaseRow[]>(
+      'SELECT * FROM appointments WHERE id = ?',
+      [appointmentId],
+    )
+    expect(rows[0].status).toBe('concluido')
   })
 
   it('isola os bloqueios do barbeiro e mantém bloqueios gerais somente para leitura', async () => {

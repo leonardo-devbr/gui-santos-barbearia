@@ -204,7 +204,7 @@ export async function processAppointmentNotifications() {
   const [appointments] = await pool.execute<AppointmentIdRow[]>(
     `SELECT id
      FROM appointments
-     WHERE appointment_date = ? AND status IN ('confirmado', 'pendente')
+     WHERE appointment_date = ? AND status = 'confirmado'
      ORDER BY appointment_time ASC`,
     [reminderDate],
   )
