@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { TimeSelect } from '@/components/ui/time-select'
 import { getWeekdayLabel } from '@/lib/business-labels'
 import type { BusinessConfiguration, BusinessHour, BusinessSettings } from '@/lib/types'
 
@@ -23,6 +24,7 @@ interface HoursResponse {
 export function AdminBusinessManager({ initial }: { initial: BusinessConfiguration }) {
   const [settings, setSettings] = useState(initial.settings)
   const [hours, setHours] = useState(initial.hours)
+  const [hoursError, setHoursError] = useState<string | null>(null)
   const [savingSection, setSavingSection] = useState<'settings' | 'hours' | null>(null)
 
   async function saveSettings(event: FormEvent<HTMLFormElement>) {
@@ -61,6 +63,20 @@ export function AdminBusinessManager({ initial }: { initial: BusinessConfigurati
 
   async function saveHours(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+
+    const invalidHour = hours.find(
+      (hour) =>
+        hour.isOpen &&
+        (!hour.openTime || !hour.closeTime || hour.openTime >= hour.closeTime),
+    )
+    if (invalidHour) {
+      setHoursError(
+        `Em ${getWeekdayLabel(invalidHour.weekday)}, o horário de fechamento deve ser posterior ao de abertura.`,
+      )
+      return
+    }
+
+    setHoursError(null)
     setSavingSection('hours')
 
     try {
@@ -73,14 +89,14 @@ export function AdminBusinessManager({ initial }: { initial: BusinessConfigurati
       const result = (await response.json().catch(() => null)) as HoursResponse | null
 
       if (!response.ok || !result?.hours) {
-        toast.error(result?.message ?? 'Não foi possível salvar os horários.')
+        setHoursError(result?.message ?? 'Não foi possível salvar os horários.')
         return
       }
 
       setHours(result.hours)
       toast.success('Horários de funcionamento atualizados.')
     } catch {
-      toast.error('Não foi possível conectar ao servidor.')
+      setHoursError('Não foi possível conectar ao servidor. Tente novamente em instantes.')
     } finally {
       setSavingSection(null)
     }
@@ -203,21 +219,32 @@ export function AdminBusinessManager({ initial }: { initial: BusinessConfigurati
 
                   {hour.isOpen ? (
                     <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-                      <Input
-                        type="time"
+                      <TimeSelect
                         value={hour.openTime ?? '09:00'}
-                        onChange={(event) => updateHour(hour.weekday, { openTime: event.target.value })}
-                        step={1800}
-                        aria-label={`Abertura de ${getWeekdayLabel(hour.weekday)}`}
+                        ariaLabel={`Abertura de ${getWeekdayLabel(hour.weekday)}`}
+                        onValueChange={(openTime) => {
+                          updateHour(hour.weekday, {
+                            openTime,
+                            closeTime:
+                              hour.closeTime && openTime >= hour.closeTime
+                                ? null
+                                : hour.closeTime,
+                          })
+                          setHoursError(null)
+                        }}
                         required
                       />
                       <span className="text-xs text-muted-foreground">até</span>
-                      <Input
-                        type="time"
-                        value={hour.closeTime ?? '18:00'}
-                        onChange={(event) => updateHour(hour.weekday, { closeTime: event.target.value })}
-                        step={1800}
-                        aria-label={`Fechamento de ${getWeekdayLabel(hour.weekday)}`}
+                      <TimeSelect
+                        value={hour.closeTime ?? ''}
+                        ariaLabel={`Fechamento de ${getWeekdayLabel(hour.weekday)}`}
+                        min={hour.openTime ?? '09:00'}
+                        excludeMin
+                        placeholder="Selecione o fechamento"
+                        onValueChange={(closeTime) => {
+                          updateHour(hour.weekday, { closeTime })
+                          setHoursError(null)
+                        }}
                         required
                       />
                     </div>
@@ -227,6 +254,14 @@ export function AdminBusinessManager({ initial }: { initial: BusinessConfigurati
                 </div>
               ))}
             </div>
+            {hoursError && (
+              <p
+                role="alert"
+                className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+              >
+                {hoursError}
+              </p>
+            )}
             <Button type="submit" size="lg" disabled={savingSection !== null}>
               {savingSection === 'hours' ? <LoaderCircle className="animate-spin" /> : <Save />}
               {savingSection === 'hours' ? 'Salvando...' : 'Salvar horários'}

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { LogoutButton } from '@/components/logout-button'
 import { ProfileForm } from '@/components/profile/profile-form'
 import { getAuthenticatedCustomer } from '@/lib/auth'
+import { getTodayInSaoPaulo } from '@/lib/date'
 
 export const metadata: Metadata = {
   title: 'Meu perfil | Gui Santos Barbearia',
@@ -29,7 +30,7 @@ export default async function PerfilPage() {
         <LogoutButton variant="outline" />
       </div>
 
-      <ProfileForm customer={currentCustomer} />
+      <ProfileForm customer={currentCustomer} today={getTodayInSaoPaulo()} />
     </div>
   )
 }

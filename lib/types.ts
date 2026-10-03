@@ -44,6 +44,7 @@ export interface Appointment {
 }
 
 export interface AdminAppointment extends Appointment {
+  customerId: string
   customerName: string
   customerPhone: string
   customerEmail: string

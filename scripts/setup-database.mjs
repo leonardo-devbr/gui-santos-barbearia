@@ -299,6 +299,22 @@ async function removePendingAppointmentStatus() {
   ])
 }
 
+async function addAppointmentPeriodIndex() {
+  const migrationName = '20260927_appointment_period_index'
+  if (await hasSchemaMigration(migrationName)) return
+
+  if (!(await hasAppointmentIndex('appointments_period_index'))) {
+    await databaseConnection.query(
+      `ALTER TABLE appointments
+       ADD INDEX appointments_period_index (appointment_date, appointment_time, barber_id)`,
+    )
+  }
+
+  await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+    migrationName,
+  ])
+}
+
 try {
   await databaseConnection.query(schema)
   await migrateCustomerEmailVerification()
@@ -307,6 +323,7 @@ try {
   await removeLegacyCustomerPhoto()
   await migrateStaffUserBarberAccess()
   await removePendingAppointmentStatus()
+  await addAppointmentPeriodIndex()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {
   await databaseConnection.end()

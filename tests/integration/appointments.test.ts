@@ -817,6 +817,49 @@ describe('acesso da equipe com MySQL', () => {
     ).resolves.toBe(true)
   })
 
+  it('consulta um período inclusivo da agenda em ordem cronológica', async () => {
+    const customerId = await createCustomer('periodo-agenda')
+    const firstDate = findNextOpenDate()
+    const secondDate = addDaysToIsoDate(firstDate, 1)
+    const outsideDate = addDaysToIsoDate(firstDate, 2)
+    const firstId = randomUUID()
+    const secondId = randomUUID()
+    const outsideId = randomUUID()
+    await applicationPool.execute<ResultSetHeader>(
+      `INSERT INTO appointments
+        (id, customer_id, service_id, barber_id, appointment_date, appointment_time,
+         status, price, duration_minutes)
+       VALUES
+        (?, ?, 'corte', 'guilherme', ?, '17:00:00', 'confirmado', 40, 45),
+        (?, ?, 'barba', 'guilherme', ?, '09:00:00', 'confirmado', 35, 30),
+        (?, ?, 'corte', 'guilherme', ?, '08:00:00', 'confirmado', 40, 45)`,
+      [
+        firstId,
+        customerId,
+        firstDate,
+        secondId,
+        customerId,
+        secondDate,
+        outsideId,
+        customerId,
+        outsideDate,
+      ],
+    )
+    await activateStaffSession(staffUserId)
+
+    const appointments = await adminAppointmentModule.getAdminAppointmentsForPeriod(
+      firstDate,
+      secondDate,
+    )
+
+    expect(appointments.map(({ id }) => id)).toEqual([firstId, secondId])
+    expect(appointments[0]).toMatchObject({
+      customerId,
+      date: firstDate,
+      time: '17:00',
+    })
+  })
+
   it('permite concluir um atendimento somente depois do horário de início', async () => {
     const customerId = await createCustomer('conclusao-equipe')
     const date = findPreviousOpenDate()

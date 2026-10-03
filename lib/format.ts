@@ -46,6 +46,17 @@ export function formatDateLong(iso: string) {
   return `${d} de ${monthFull[m - 1]} de ${y}`
 }
 
+export function formatDateNumeric(iso: string) {
+  const [year, month, day] = iso.split('-')
+  return `${day}/${month}/${year}`
+}
+
+export function formatMonthYear(iso: string) {
+  const [year, month] = iso.split('-').map(Number)
+  const label = monthFull[month - 1] ?? ''
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)} de ${year}`
+}
+
 export function formatDateWeekday(iso: string) {
   const date = new Date(`${iso}T00:00:00`)
   const weekday = date.toLocaleDateString('pt-BR', { weekday: 'long' })

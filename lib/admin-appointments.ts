@@ -2,7 +2,7 @@ import 'server-only'
 
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { getAuthenticatedStaff } from '@/lib/admin-auth'
-import { getNowInSaoPaulo, getTodayInSaoPaulo } from '@/lib/date'
+import { getNowInSaoPaulo, getTodayInSaoPaulo, isValidIsoDate } from '@/lib/date'
 import { getPool, withTransaction } from '@/lib/db'
 import type { AdminAppointment, AppointmentStatus } from '@/lib/types'
 
@@ -12,6 +12,7 @@ interface AdminAppointmentRow extends RowDataPacket {
   barber_id: string
   service_name: string
   barber_name: string
+  customer_id: string
   customer_name: string
   customer_phone: string
   customer_email: string
@@ -82,6 +83,7 @@ function mapAppointment(
     barberId: row.barber_id,
     serviceName: row.service_name,
     barberName: row.barber_name,
+    customerId: row.customer_id,
     customerName: row.customer_name,
     customerPhone: row.customer_phone,
     customerEmail: row.customer_email,
@@ -100,13 +102,32 @@ export async function getAdminAppointments(
   date = getTodayInSaoPaulo(),
   requestedBarberId?: string,
 ) {
+  return getAdminAppointmentsForPeriod(date, date, requestedBarberId)
+}
+
+export async function getAdminAppointmentsForPeriod(
+  startDate: string,
+  endDate: string,
+  requestedBarberId?: string,
+) {
   const staff = await requireStaffAccess()
+  if (!isValidIsoDate(startDate) || !isValidIsoDate(endDate) || startDate > endDate) {
+    throw new AdminAppointmentError('Informe um período válido para consultar a agenda.', 422)
+  }
+
+  const rangeInDays =
+    (Date.parse(`${endDate}T12:00:00.000Z`) - Date.parse(`${startDate}T12:00:00.000Z`)) /
+    86_400_000
+  if (rangeInDays > 366) {
+    throw new AdminAppointmentError('Consulte no máximo 367 dias por vez.', 422)
+  }
+
   if (requestedBarberId && requestedBarberId.length > 64) {
     throw new AdminAppointmentError('Barbeiro inválido.', 422)
   }
   const barberId = staff.role === 'barber' ? staff.barberId : requestedBarberId
   const barberClause = barberId ? 'AND appointments.barber_id = ?' : ''
-  const parameters = barberId ? [date, barberId] : [date]
+  const parameters = barberId ? [startDate, endDate, barberId] : [startDate, endDate]
 
   const [rows] = await getPool().execute<AdminAppointmentRow[]>(
     `SELECT
@@ -115,6 +136,7 @@ export async function getAdminAppointments(
       appointments.barber_id,
       services.name AS service_name,
       barbers.name AS barber_name,
+      appointments.customer_id,
       customers.name AS customer_name,
       customers.phone AS customer_phone,
       customers.email AS customer_email,
@@ -127,9 +149,9 @@ export async function getAdminAppointments(
     INNER JOIN services ON services.id = appointments.service_id
     INNER JOIN barbers ON barbers.id = appointments.barber_id
     INNER JOIN customers ON customers.id = appointments.customer_id
-    WHERE appointments.appointment_date = ?
+    WHERE appointments.appointment_date BETWEEN ? AND ?
       ${barberClause}
-    ORDER BY appointments.appointment_time ASC`,
+    ORDER BY appointments.appointment_date ASC, appointments.appointment_time ASC, barbers.name ASC`,
     parameters,
   )
 

@@ -186,6 +186,7 @@ CREATE TABLE IF NOT EXISTS appointments (
     appointment_time,
     active_slot
   ),
+  KEY appointments_period_index (appointment_date, appointment_time, barber_id),
   KEY appointments_customer_schedule_index (customer_id, appointment_date, appointment_time),
   CONSTRAINT appointments_customer_id_fk
     FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE,

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { LoaderCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { DatePicker } from '@/components/ui/date-picker'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Textarea } from '@/components/ui/textarea'
@@ -33,7 +34,7 @@ interface ProfileResponse {
   developmentVerificationUrl?: string
 }
 
-export function ProfileForm({ customer }: { customer: CustomerProfile }) {
+export function ProfileForm({ customer, today }: { customer: CustomerProfile; today: string }) {
   const router = useRouter()
   const [form, setForm] = useState({
     name: customer.name,
@@ -65,8 +66,6 @@ export function ProfileForm({ customer }: { customer: CustomerProfile }) {
   function validate() {
     const validationErrors: ProfileErrors = {}
     const phoneDigits = normalizePhone(form.phone)
-    const today = new Date().toISOString().slice(0, 10)
-
     if (form.name.trim().length < 3) validationErrors.name = 'Informe seu nome completo.'
     if (phoneDigits.length < 10 || phoneDigits.length > 11) {
       validationErrors.phone = 'Informe um telefone com DDD.'
@@ -184,15 +183,19 @@ export function ProfileForm({ customer }: { customer: CustomerProfile }) {
               </Field>
               <Field data-invalid={Boolean(errors.birthDate)}>
                 <FieldLabel htmlFor="birthDate">Data de nascimento</FieldLabel>
-                <Input
+                <DatePicker
                   id="birthDate"
                   name="birthDate"
-                  type="date"
-                  autoComplete="bday"
                   value={form.birthDate}
-                  aria-invalid={Boolean(errors.birthDate)}
-                  aria-describedby={errors.birthDate ? 'profile-birth-date-error' : undefined}
+                  min="1900-01-01"
+                  max={today}
+                  allowClear
+                  placeholder="Selecione sua data"
+                  dialogTitle="Escolha sua data de nascimento"
+                  ariaInvalid={Boolean(errors.birthDate)}
+                  ariaDescribedBy={errors.birthDate ? 'profile-birth-date-error' : undefined}
                   onValueChange={(value) => update('birthDate', value)}
+                  className="w-full"
                 />
                 <FieldError id="profile-birth-date-error">{errors.birthDate}</FieldError>
               </Field>

@@ -16,10 +16,26 @@ interface ApiResponse {
   message?: string
 }
 
-export function AdminAppointmentsList({ initial }: { initial: AdminAppointment[] }) {
+export function AdminAppointmentsList({
+  appointments,
+  initial,
+  onStatusChange,
+  emptyTitle = 'Nenhum horário neste período',
+  emptyDescription = 'Não há agendamentos para os filtros selecionados.',
+}: {
+  appointments?: AdminAppointment[]
+  initial?: AdminAppointment[]
+  onStatusChange?: (
+    appointmentId: string,
+    status: Extract<AppointmentStatus, 'concluido' | 'cancelado'>,
+  ) => void
+  emptyTitle?: string
+  emptyDescription?: string
+}) {
   const router = useRouter()
-  const [appointments, setAppointments] = useState(initial)
+  const [localAppointments, setLocalAppointments] = useState(initial ?? [])
   const [updatingId, setUpdatingId] = useState<string | null>(null)
+  const visibleAppointments = appointments ?? localAppointments
 
   async function updateStatus(
     appointment: AdminAppointment,
@@ -51,13 +67,17 @@ export function AdminAppointmentsList({ initial }: { initial: AdminAppointment[]
         return
       }
 
-      setAppointments((current) =>
-        current.map((item) =>
-          item.id === appointment.id
-            ? { ...item, status, canComplete: false, canCancel: false }
-            : item,
-        ),
-      )
+      if (onStatusChange) {
+        onStatusChange(appointment.id, status)
+      } else {
+        setLocalAppointments((current) =>
+          current.map((item) =>
+            item.id === appointment.id
+              ? { ...item, status, canComplete: false, canCancel: false }
+              : item,
+          ),
+        )
+      }
       toast.success(
         status === 'concluido'
           ? 'Atendimento concluído.'
@@ -73,15 +93,15 @@ export function AdminAppointmentsList({ initial }: { initial: AdminAppointment[]
     }
   }
 
-  if (appointments.length === 0) {
+  if (visibleAppointments.length === 0) {
     return (
       <Empty className="rounded-2xl border border-border bg-card">
         <EmptyHeader>
           <EmptyMedia variant="icon">
             <Clock />
           </EmptyMedia>
-          <EmptyTitle>Nenhum horário nesta data</EmptyTitle>
-          <EmptyDescription>A agenda está livre para o dia selecionado.</EmptyDescription>
+          <EmptyTitle>{emptyTitle}</EmptyTitle>
+          <EmptyDescription>{emptyDescription}</EmptyDescription>
         </EmptyHeader>
       </Empty>
     )
@@ -89,7 +109,7 @@ export function AdminAppointmentsList({ initial }: { initial: AdminAppointment[]
 
   return (
     <div className="flex flex-col gap-3">
-      {appointments.map((appointment) => {
+      {visibleAppointments.map((appointment) => {
         const isUpdating = updatingId === appointment.id
         const hasActions = appointment.canComplete || appointment.canCancel
 

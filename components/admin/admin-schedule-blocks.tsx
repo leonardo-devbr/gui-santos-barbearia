@@ -5,8 +5,10 @@ import { CalendarOff, Clock, LoaderCircle, Trash2, UserRound } from 'lucide-reac
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { DatePicker } from '@/components/ui/date-picker'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
+import { TimeSelect } from '@/components/ui/time-select'
 import { formatDateLong } from '@/lib/format'
 import type { Barber, ScheduleBlock } from '@/lib/types'
 
@@ -38,6 +40,10 @@ export function AdminScheduleBlocks({
 }) {
   const [blocks, setBlocks] = useState(initial)
   const [fullDay, setFullDay] = useState(true)
+  const [date, setDate] = useState(today)
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [formError, setFormError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
@@ -45,6 +51,13 @@ export function AdminScheduleBlocks({
     event.preventDefault()
     const form = event.currentTarget
     const data = new FormData(form)
+
+    if (!fullDay && (!startTime || !endTime || startTime >= endTime)) {
+      setFormError('O horário de término deve ser posterior ao horário de início.')
+      return
+    }
+
+    setFormError(null)
     setIsSubmitting(true)
 
     try {
@@ -64,16 +77,19 @@ export function AdminScheduleBlocks({
       const result = (await response.json().catch(() => null)) as ApiResponse | null
 
       if (!response.ok || !result?.block) {
-        toast.error(result?.message ?? 'Não foi possível criar o bloqueio.')
+        setFormError(result?.message ?? 'Não foi possível criar o bloqueio.')
         return
       }
 
       setBlocks((current) => sortBlocks([...current, result.block!]))
       form.reset()
       setFullDay(true)
+      setDate(today)
+      setStartTime('')
+      setEndTime('')
       toast.success('Período bloqueado com sucesso.')
     } catch {
-      toast.error('Não foi possível conectar ao servidor.')
+      setFormError('Não foi possível conectar ao servidor. Tente novamente em instantes.')
     } finally {
       setIsSubmitting(false)
     }
@@ -139,14 +155,27 @@ export function AdminScheduleBlocks({
 
             <label className="flex flex-col gap-1.5 text-sm font-medium text-card-foreground">
               Data
-              <Input name="date" type="date" min={today} defaultValue={today} required />
+              <DatePicker
+                name="date"
+                value={date}
+                min={today}
+                onValueChange={(value) => {
+                  setDate(value)
+                  setFormError(null)
+                }}
+                dialogTitle="Escolha o dia do bloqueio"
+                className="w-full"
+              />
             </label>
 
             <label className="flex items-center gap-2 text-sm font-medium text-card-foreground">
               <input
                 type="checkbox"
                 checked={fullDay}
-                onChange={(event) => setFullDay(event.target.checked)}
+                onChange={(event) => {
+                  setFullDay(event.target.checked)
+                  setFormError(null)
+                }}
                 className="size-4 accent-primary"
               />
               Bloquear o dia inteiro
@@ -156,11 +185,33 @@ export function AdminScheduleBlocks({
               <div className="grid grid-cols-2 gap-3">
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-card-foreground">
                   Início
-                  <Input name="startTime" type="time" step={1800} required />
+                  <TimeSelect
+                    name="startTime"
+                    value={startTime}
+                    required
+                    placeholder="Selecione o início"
+                    onValueChange={(value) => {
+                      setStartTime(value)
+                      if (endTime && value >= endTime) setEndTime('')
+                      setFormError(null)
+                    }}
+                  />
                 </label>
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-card-foreground">
                   Fim
-                  <Input name="endTime" type="time" step={1800} required />
+                  <TimeSelect
+                    name="endTime"
+                    value={endTime}
+                    min={startTime || undefined}
+                    excludeMin
+                    required
+                    disabled={!startTime}
+                    placeholder={startTime ? 'Selecione o término' : 'Escolha o início primeiro'}
+                    onValueChange={(value) => {
+                      setEndTime(value)
+                      setFormError(null)
+                    }}
+                  />
                 </label>
               </div>
             )}
@@ -176,6 +227,15 @@ export function AdminScheduleBlocks({
                 required
               />
             </label>
+
+            {formError && (
+              <p
+                role="alert"
+                className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+              >
+                {formError}
+              </p>
+            )}
 
             <Button type="submit" size="lg" disabled={isSubmitting || barbers.length === 0}>
               {isSubmitting ? <LoaderCircle className="animate-spin" /> : <CalendarOff />}
