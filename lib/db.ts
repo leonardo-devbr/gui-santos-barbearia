@@ -48,9 +48,13 @@ function getSslConfig(host: string): PoolOptions['ssl'] | undefined {
 
 function getDatabaseConfig() {
   const port = Number(process.env.MYSQL_PORT ?? 3306)
+  const connectionLimit = Number(process.env.MYSQL_CONNECTION_LIMIT ?? 10)
 
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error('MYSQL_PORT deve ser uma porta válida.')
+  }
+  if (!Number.isInteger(connectionLimit) || connectionLimit < 1 || connectionLimit > 50) {
+    throw new Error('MYSQL_CONNECTION_LIMIT deve ser um número inteiro entre 1 e 50.')
   }
 
   const host = process.env.MYSQL_HOST?.trim() || '127.0.0.1'
@@ -78,6 +82,7 @@ function getDatabaseConfig() {
     password,
     database,
     ssl: getSslConfig(host),
+    connectionLimit,
   }
 }
 
@@ -96,8 +101,8 @@ export function getPool() {
       dateStrings: true,
       decimalNumbers: true,
       waitForConnections: true,
-      connectionLimit: 10,
-      maxIdle: 10,
+      connectionLimit: config.connectionLimit,
+      maxIdle: config.connectionLimit,
       idleTimeout: 60_000,
       enableKeepAlive: true,
     })

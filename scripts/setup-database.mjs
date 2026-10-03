@@ -51,6 +51,7 @@ const connectionUser = setupUser || applicationUser
 const connectionPassword = setupUser
   ? (process.env.MYSQL_SETUP_PASSWORD ?? '')
   : (process.env.MYSQL_PASSWORD ?? '')
+const shouldCreateDatabase = readBooleanSetting('MYSQL_CREATE_DATABASE', true)
 
 if (process.env.MYSQL_SETUP_PASSWORD !== undefined && !setupUser) {
   throw new Error('MYSQL_SETUP_PASSWORD exige MYSQL_SETUP_USER.')
@@ -86,14 +87,16 @@ const connectionOptions = {
 
 const schemaPath = fileURLToPath(new URL('../database/schema.sql', import.meta.url))
 const schema = await readFile(schemaPath, 'utf8')
-const bootstrapConnection = await mysql.createConnection(connectionOptions)
+if (shouldCreateDatabase) {
+  const bootstrapConnection = await mysql.createConnection(connectionOptions)
 
-try {
-  await bootstrapConnection.query(
-    `CREATE DATABASE IF NOT EXISTS \`${databaseName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
-  )
-} finally {
-  await bootstrapConnection.end()
+  try {
+    await bootstrapConnection.query(
+      `CREATE DATABASE IF NOT EXISTS \`${databaseName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`,
+    )
+  } finally {
+    await bootstrapConnection.end()
+  }
 }
 
 const databaseConnection = await mysql.createConnection({

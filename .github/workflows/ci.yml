@@ -76,3 +76,6 @@ jobs:
 
       - name: Build application
         run: npm run build
+
+      - name: Build deployment image
+        run: docker build --tag gui-santos-barbearia:ci .

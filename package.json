@@ -13,9 +13,10 @@
     "typecheck": "tsc --noEmit --incremental false",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:setup": "node --env-file=.env.local scripts/setup-database.mjs",
-    "admin:create": "node --env-file=.env.local scripts/create-admin.mjs",
-    "notifications:process": "node --env-file=.env.local scripts/process-notifications.mjs"
+    "db:setup": "node --env-file-if-exists=.env.local scripts/setup-database.mjs",
+    "admin:create": "node --env-file-if-exists=.env.local scripts/create-admin.mjs",
+    "test-users:seed": "node --env-file-if-exists=.env.local scripts/seed-test-users.mjs",
+    "notifications:process": "node --env-file-if-exists=.env.local scripts/process-notifications.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

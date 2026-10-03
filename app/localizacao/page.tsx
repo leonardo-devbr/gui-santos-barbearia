@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { connection } from 'next/server'
 import Link from 'next/link'
 import { MapPin, Phone, Clock, Mail, Car, TramFront } from 'lucide-react'
 import { SiteHeader } from '@/components/site-header'
@@ -16,6 +17,7 @@ export const metadata: Metadata = {
 }
 
 export default async function LocationPage() {
+  await connection()
   const { settings, hours } = await getBusinessConfiguration()
 
   return (

@@ -2,6 +2,10 @@
 
 Site, área do cliente e painel da equipe para a gestão de horários da Gui Santos Barbearia.
 
+## Homologação gratuita
+
+O projeto está preparado para rodar no plano Developer Sandbox do Northflank com um serviço Next.js, um MySQL privado e jobs de inicialização. Consulte o [guia completo de publicação](docs/northflank.md). Essa opção mantém o MySQL e é destinada aos testes antes da publicação definitiva.
+
 ## Tecnologias
 
 - Next.js 16 com App Router
