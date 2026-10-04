@@ -1,0 +1,281 @@
+
+'use client'
+
+import { useState } from 'react'
+import Link from 'next/link'
+import { CheckCircle2, LoaderCircle } from 'lucide-react'
+import { toast } from 'sonner'
+import { AuthShell } from '@/components/auth-shell'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
+import {
+  formatPhone,
+  getPasswordError,
+  isValidEmail,
+  MAX_PASSWORD_LENGTH,
+  normalizeEmail,
+  normalizePhone,
+} from '@/lib/validation'
+
+type SignupField = 'name' | 'phone' | 'email' | 'password' | 'passwordConfirmation'
+
+type SignupErrors = Partial<Record<SignupField, string>>
+
+interface SignupResponse {
+  message?: string
+  errors?: SignupErrors
+  developmentVerificationUrl?: string
+}
+
+function validateSignup(formData: FormData) {
+  const name = String(formData.get('name') ?? '').trim().replace(/\s+/g, ' ')
+  const phone = normalizePhone(String(formData.get('phone') ?? ''))
+  const email = normalizeEmail(String(formData.get('email') ?? ''))
+  const password = String(formData.get('password') ?? '')
+  const passwordConfirmation = String(formData.get('passwordConfirmation') ?? '')
+  const errors: SignupErrors = {}
+
+  if (name.length < 3) {
+    errors.name = 'Informe seu nome completo.'
+  } else if (name.length > 80) {
+    errors.name = 'O nome deve ter no máximo 80 caracteres.'
+  }
+
+  if (phone.length < 10 || phone.length > 11) {
+    errors.phone = 'Informe um telefone com DDD.'
+  }
+
+  if (!isValidEmail(email)) {
+    errors.email = 'Informe um e-mail válido.'
+  }
+
+  const passwordError = getPasswordError(password, { minLength: 1 })
+  if (passwordError) errors.password = passwordError
+
+  if (!passwordConfirmation) {
+    errors.passwordConfirmation = 'Confirme sua senha.'
+  } else if (passwordConfirmation !== password) {
+    errors.passwordConfirmation = 'As senhas não coincidem.'
+  }
+
+  return {
+    data: { name, phone, email, password },
+    errors,
+  }
+}
+
+export default function SignupPage() {
+  const [phone, setPhone] = useState('')
+  const [errors, setErrors] = useState<SignupErrors>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isCompleted, setIsCompleted] = useState(false)
+  const [developmentVerificationUrl, setDevelopmentVerificationUrl] = useState<string | null>(null)
+
+  function clearError(field: SignupField) {
+    setErrors((current) => {
+      if (!current[field]) return current
+
+      const next = { ...current }
+      delete next[field]
+      return next
+    })
+    setSubmitError(null)
+  }
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const { data, errors: validationErrors } = validateSignup(new FormData(event.currentTarget))
+
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors)
+      setSubmitError('Revise os campos destacados para continuar.')
+      return
+    }
+
+    setErrors({})
+    setSubmitError(null)
+    setIsSubmitting(true)
+
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      })
+      const result = (await response.json().catch(() => null)) as SignupResponse | null
+
+      if (!response.ok) {
+        if (result?.errors) setErrors(result.errors)
+        setSubmitError(result?.message ?? 'Não foi possível criar sua conta. Tente novamente mais tarde.')
+        return
+      }
+
+      toast.success('Confira seu e-mail para ativar a conta.')
+      setDevelopmentVerificationUrl(result?.developmentVerificationUrl ?? null)
+      setIsCompleted(true)
+    } catch {
+      setSubmitError('Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  if (isCompleted) {
+    return (
+      <AuthShell>
+        <div className="flex flex-col gap-6" role="status">
+          <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <CheckCircle2 className="size-6" aria-hidden="true" />
+          </div>
+          <div className="flex flex-col gap-2">
+            <h1 className="font-serif text-3xl text-foreground">Confirme seu e-mail</h1>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Se o endereço puder ser cadastrado, você receberá um link válido por 24 horas para ativar a conta.
+            </p>
+          </div>
+          {developmentVerificationUrl && (
+            <Button
+              render={<Link href={developmentVerificationUrl} />}
+              nativeButton={false}
+              size="lg"
+              className="w-full"
+            >
+              Abrir link de desenvolvimento
+            </Button>
+          )}
+          <Button render={<Link href="/login" />} nativeButton={false} size="lg" className="w-full">
+            Ir para o login
+          </Button>
+        </div>
+      </AuthShell>
+    )
+  }
+
+  return (
+    <AuthShell>
+      <div className="flex flex-col gap-2">
+        <h1 className="font-serif text-3xl text-foreground">Criar conta</h1>
+        <p className="text-sm text-muted-foreground">Cadastre-se para agendar seus horários.</p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="flex flex-col gap-6" noValidate>
+        <FieldGroup>
+          <Field data-invalid={Boolean(errors.name)}>
+            <FieldLabel htmlFor="name">Nome completo</FieldLabel>
+            <Input
+              id="name"
+              name="name"
+              autoComplete="name"
+              placeholder="Seu nome"
+              maxLength={80}
+              aria-invalid={Boolean(errors.name)}
+              aria-describedby={errors.name ? 'name-error' : undefined}
+              onChange={() => clearError('name')}
+              required
+            />
+            <FieldError id="name-error">{errors.name}</FieldError>
+          </Field>
+          <Field data-invalid={Boolean(errors.phone)}>
+            <FieldLabel htmlFor="phone">Telefone</FieldLabel>
+            <Input
+              id="phone"
+              name="phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="(11) 90000-0000"
+              value={phone}
+              maxLength={15}
+              aria-invalid={Boolean(errors.phone)}
+              aria-describedby={errors.phone ? 'phone-error' : undefined}
+              onValueChange={(value) => {
+                setPhone(formatPhone(value))
+                clearError('phone')
+              }}
+              required
+            />
+            <FieldError id="phone-error">{errors.phone}</FieldError>
+          </Field>
+          <Field data-invalid={Boolean(errors.email)}>
+            <FieldLabel htmlFor="email">E-mail</FieldLabel>
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              placeholder="voce@email.com"
+              maxLength={254}
+              autoCapitalize="none"
+              spellCheck={false}
+              aria-invalid={Boolean(errors.email)}
+              aria-describedby={errors.email ? 'email-error' : undefined}
+              onChange={() => clearError('email')}
+              required
+            />
+            <FieldError id="email-error">{errors.email}</FieldError>
+          </Field>
+          <Field data-invalid={Boolean(errors.password)}>
+            <FieldLabel htmlFor="password">Senha</FieldLabel>
+            <PasswordInput
+              id="password"
+              name="password"
+              autoComplete="new-password"
+              placeholder="••••••••"
+              minLength={1}
+              maxLength={MAX_PASSWORD_LENGTH}
+              aria-invalid={Boolean(errors.password)}
+              aria-describedby={errors.password ? 'password-error' : 'password-description'}
+              onChange={() => clearError('password')}
+              required
+            />
+            {!errors.password && (
+              <FieldDescription id="password-description">
+                Use uma senha com letra e número.
+              </FieldDescription>
+            )}
+            <FieldError id="password-error">{errors.password}</FieldError>
+          </Field>
+          <Field data-invalid={Boolean(errors.passwordConfirmation)}>
+            <FieldLabel htmlFor="passwordConfirmation">Confirmar senha</FieldLabel>
+            <PasswordInput
+              id="passwordConfirmation"
+              name="passwordConfirmation"
+              autoComplete="new-password"
+              placeholder="Digite a senha novamente"
+              minLength={1}
+              maxLength={MAX_PASSWORD_LENGTH}
+              aria-invalid={Boolean(errors.passwordConfirmation)}
+              aria-describedby={errors.passwordConfirmation ? 'password-confirmation-error' : undefined}
+              onChange={() => clearError('passwordConfirmation')}
+              required
+            />
+            <FieldError id="password-confirmation-error">{errors.passwordConfirmation}</FieldError>
+          </Field>
+        </FieldGroup>
+
+        {submitError && (
+          <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {submitError}
+          </p>
+        )}
+
+        <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
+          {isSubmitting && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+          {isSubmitting ? 'Criando conta...' : 'Criar conta'}
+        </Button>
+      </form>
+
+      <p className="text-center text-sm text-muted-foreground">
+        Já tem conta?{' '}
+        <Link href="/login" className="font-medium text-primary hover:underline">
+          Entrar
+        </Link>
+      </p>
+    </AuthShell>
+  )
+}

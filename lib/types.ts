@@ -1,0 +1,133 @@
+// Tipos centrais do domínio. Organizados para facilitar a futura substituição
+// por respostas da API conectada ao MySQL.
+
+export interface Service {
+  id: string
+  name: string
+  description: string
+  durationMinutes: number
+  price: number
+  category: 'cortes' | 'barba' | 'combos' | 'acabamentos'
+}
+
+export interface AdminService extends Service {
+  isActive: boolean
+}
+
+export interface Barber {
+  id: string
+  name: string
+  specialty: string
+  rating: number
+  reviewCount: number
+  bio: string
+  photoUrl: string
+}
+
+export interface AdminBarber extends Barber {
+  isActive: boolean
+}
+
+export type AppointmentStatus = 'confirmado' | 'pendente' | 'concluido' | 'cancelado'
+
+export interface Appointment {
+  id: string
+  serviceId: string
+  barberId: string
+  serviceName?: string
+  barberName?: string
+  date: string // ISO date, e.g. 2026-08-22
+  time: string // HH:mm
+  status: AppointmentStatus
+  price: number
+  durationMinutes: number
+}
+
+export interface AdminAppointment extends Appointment {
+  customerName: string
+  customerPhone: string
+  customerEmail: string
+}
+
+export interface ScheduleBlock {
+  id: string
+  barberId: string | null
+  barberName: string
+  date: string
+  startTime: string | null
+  endTime: string | null
+  reason: string
+  canDelete: boolean
+}
+
+export interface BusinessSettings {
+  name: string
+  street: string
+  district: string
+  city: string
+  state: string
+  postalCode: string
+  phone: string
+  email: string
+  latitude: number
+  longitude: number
+  parkingInfo: string
+  transitInfo: string
+  cnpj: string
+}
+
+export interface BusinessHour {
+  weekday: number
+  isOpen: boolean
+  openTime: string | null
+  closeTime: string | null
+}
+
+export interface BusinessConfiguration {
+  settings: BusinessSettings
+  hours: BusinessHour[]
+}
+
+export type StaffRole = 'admin' | 'barber'
+
+export interface StaffAccount {
+  id: string
+  name: string
+  email: string
+  role: StaffRole
+  barberId: string | null
+  barberName: string | null
+  isActive: boolean
+  isCurrent: boolean
+}
+
+export const serviceCategoryLabels: Record<Service['category'], string> = {
+  cortes: 'Cortes',
+  barba: 'Barba',
+  combos: 'Combos',
+  acabamentos: 'Acabamentos',
+}
+
+export interface TimeSlot {
+  time: string // HH:mm
+  available: boolean
+}
+
+export interface Review {
+  id: string
+  customerName: string
+  rating: number
+  comment: string
+  date: string
+}
+
+export interface CustomerProfile {
+  id: string
+  name: string
+  phone: string
+  email: string
+  birthDate: string
+  preferredCut: string
+  beardStyle: string
+  notes: string
+}
