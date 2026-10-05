@@ -46,10 +46,12 @@ MYSQL_CONNECTION_LIMIT=5
 TRUSTED_PROXY_IP_HEADER=x-forwarded-for
 DEV_EXPOSE_PASSWORD_RESET_URL=false
 DEV_EXPOSE_EMAIL_VERIFICATION_URL=false
+GOOGLE_MAPS_EMBED_API_KEY=sua-chave-restrita-da-maps-embed-api
 CRON_SECRET=gere-um-valor-aleatorio-com-pelo-menos-32-caracteres
 ```
 
 Não defina `MYSQL_SETUP_USER` ou `MYSQL_SETUP_PASSWORD` na aplicação. O usuário normal do addon é suficiente para preparar as tabelas dentro do banco já criado.
+Restrinja `GOOGLE_MAPS_EMBED_API_KEY` no Google Cloud à URL pública do serviço antes de disponibilizar o ambiente de homologação.
 
 ## 4. Criar o serviço web
 

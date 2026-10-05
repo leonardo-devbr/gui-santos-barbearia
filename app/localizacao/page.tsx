@@ -5,7 +5,7 @@ import { MapPin, Phone, Clock, Mail, Car, TramFront } from 'lucide-react'
 import { SiteHeader } from '@/components/site-header'
 import { SiteFooter } from '@/components/site-footer'
 import { Button } from '@/components/ui/button'
-import { LocationMapLoader } from '@/components/location-map-loader'
+import { LocationMap } from '@/components/location-map'
 import { getLoginHref } from '@/lib/navigation'
 import { getBusinessConfiguration } from '@/lib/business'
 import { formatBusinessHour, formatPostalCode, getWeekdayLabel } from '@/lib/business-labels'
@@ -36,7 +36,12 @@ export default async function LocationPage() {
 
         <div className="mx-auto grid max-w-6xl grid-cols-1 gap-8 px-6 pb-24 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="h-[420px] overflow-hidden rounded-xl border border-border lg:h-[560px]">
-            <LocationMapLoader settings={settings} />
+            <LocationMap
+              name={settings.name}
+              street={settings.street}
+              latitude={settings.latitude}
+              longitude={settings.longitude}
+            />
           </div>
 
           <div className="flex flex-col gap-6">

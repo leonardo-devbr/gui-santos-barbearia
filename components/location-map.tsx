@@ -1,51 +1,63 @@
-'use client'
+import { ExternalLink, MapPin } from 'lucide-react'
+import {
+  getGoogleMapsDirectionsUrl,
+  getGoogleMapsEmbedUrl,
+} from '@/lib/google-maps'
 
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
-const markerSvg = encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42"><path d="M16 0C7.163 0 0 7.163 0 16c0 11 16 26 16 26s16-15 16-26C32 7.163 24.837 0 16 0z" fill="#D4A94E"/><circle cx="16" cy="16" r="6" fill="#141210"/></svg>',
-)
-
-const goldIcon = L.icon({
-  iconUrl: `data:image/svg+xml;charset=UTF-8,${markerSvg}`,
-  iconSize: [32, 42],
-  iconAnchor: [16, 42],
-  popupAnchor: [0, -38],
-})
+interface LocationMapProps {
+  name: string
+  street: string
+  latitude: number
+  longitude: number
+}
 
 export function LocationMap({
   name,
   street,
   latitude,
   longitude,
-}: {
-  name: string
-  street: string
-  latitude: number
-  longitude: number
-}) {
-  const position: [number, number] = [latitude, longitude]
+}: LocationMapProps) {
+  const embedUrl = getGoogleMapsEmbedUrl({
+    apiKey: process.env.GOOGLE_MAPS_EMBED_API_KEY,
+    latitude,
+    longitude,
+  })
+  const directionsUrl = getGoogleMapsDirectionsUrl(latitude, longitude)
+
+  if (!embedUrl) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 bg-card px-6 text-center">
+        <span className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <MapPin className="size-6" aria-hidden="true" />
+        </span>
+        <div className="max-w-sm space-y-1">
+          <p className="font-serif text-xl text-card-foreground">{name}</p>
+          <p className="text-sm text-muted-foreground">{street}</p>
+          <p className="pt-2 text-xs text-muted-foreground">
+            O mapa interativo está temporariamente indisponível.
+          </p>
+        </div>
+        <a
+          href={directionsUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-2 text-sm font-medium text-primary transition-colors hover:text-primary/80"
+        >
+          Abrir rota no Google Maps
+          <ExternalLink className="size-4" aria-hidden="true" />
+        </a>
+      </div>
+    )
+  }
 
   return (
-    <MapContainer
-      center={position}
-      zoom={15}
-      scrollWheelZoom={false}
-      style={{ height: '100%', width: '100%' }}
-      className="z-0"
-    >
-      <TileLayer
-        url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-      />
-      <Marker position={position} icon={goldIcon}>
-        <Popup>
-          <span className="font-medium">{name}</span>
-          <br />
-          {street}
-        </Popup>
-      </Marker>
-    </MapContainer>
+    <iframe
+      title={`Mapa da ${name}`}
+      src={embedUrl}
+      className="h-full w-full border-0"
+      loading="lazy"
+      allowFullScreen
+      referrerPolicy="strict-origin-when-cross-origin"
+    />
   )
 }

@@ -138,6 +138,16 @@ Copie o resultado para o `.env.local`. O segredo precisa ter pelo menos 32 carac
 CRON_SECRET="valor-aleatorio-gerado"
 ```
 
+### Configurar o Google Maps
+
+Para exibir o mapa interativo da localização, habilite a [Maps Embed API](https://developers.google.com/maps/documentation/embed/get-started) em um projeto do Google Cloud e configure a chave no `.env.local`:
+
+```env
+GOOGLE_MAPS_EMBED_API_KEY="sua-chave-da-maps-embed-api"
+```
+
+Restrinja a chave no Google Cloud aos domínios autorizados a exibir o site. Sem essa variável, a página continua mostrando o endereço e oferece um link direto para abrir a rota no Google Maps, mas não carrega o mapa incorporado.
+
 ### 8. Iniciar o site
 
 ```powershell
