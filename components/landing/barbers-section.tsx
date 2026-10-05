@@ -22,6 +22,7 @@ export function BarbersSection({ barbers }: { barbers: Barber[] }) {
                 alt={`Foto de ${barber.name}`}
                 fill
                 className="object-cover"
+                style={{ objectPosition: `${barber.photoPositionX}% ${barber.photoPositionY}%` }}
               />
             </div>
             <div className="flex flex-col gap-1.5 px-5 pb-5">

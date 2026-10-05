@@ -22,6 +22,8 @@ export interface Barber {
   reviewCount: number
   bio: string
   photoUrl: string
+  photoPositionX: number
+  photoPositionY: number
 }
 
 export interface AdminBarber extends Barber {

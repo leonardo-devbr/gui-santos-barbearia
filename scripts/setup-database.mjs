@@ -160,6 +160,17 @@ async function hasStaffUserIndex(name) {
   return Boolean(rows[0])
 }
 
+async function hasBarberColumn(name) {
+  const [rows] = await databaseConnection.execute(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'barbers' AND column_name = ?
+     LIMIT 1`,
+    [name],
+  )
+  return Boolean(rows[0])
+}
+
 async function hasSchemaMigration(name) {
   const [rows] = await databaseConnection.execute(
     'SELECT 1 FROM schema_migrations WHERE name = ? LIMIT 1',
@@ -318,6 +329,41 @@ async function addAppointmentPeriodIndex() {
   ])
 }
 
+async function addBarberProfilePhotos() {
+  const migrationName = '20261004_barber_profile_photos'
+  if (await hasSchemaMigration(migrationName)) return
+
+  if (!(await hasBarberColumn('photo_data'))) {
+    await databaseConnection.query(
+      'ALTER TABLE barbers ADD COLUMN photo_data MEDIUMBLOB NULL AFTER photo_url',
+    )
+  }
+  if (!(await hasBarberColumn('photo_mime'))) {
+    await databaseConnection.query(
+      'ALTER TABLE barbers ADD COLUMN photo_mime VARCHAR(32) NULL AFTER photo_data',
+    )
+  }
+  if (!(await hasBarberColumn('photo_position_x'))) {
+    await databaseConnection.query(
+      'ALTER TABLE barbers ADD COLUMN photo_position_x TINYINT UNSIGNED NOT NULL DEFAULT 50 AFTER photo_mime',
+    )
+  }
+  if (!(await hasBarberColumn('photo_position_y'))) {
+    await databaseConnection.query(
+      'ALTER TABLE barbers ADD COLUMN photo_position_y TINYINT UNSIGNED NOT NULL DEFAULT 50 AFTER photo_position_x',
+    )
+  }
+  if (!(await hasBarberColumn('photo_revision'))) {
+    await databaseConnection.query(
+      'ALTER TABLE barbers ADD COLUMN photo_revision INT UNSIGNED NOT NULL DEFAULT 0 AFTER photo_position_y',
+    )
+  }
+
+  await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+    migrationName,
+  ])
+}
+
 try {
   await databaseConnection.query(schema)
   await migrateCustomerEmailVerification()
@@ -327,6 +373,7 @@ try {
   await migrateStaffUserBarberAccess()
   await removePendingAppointmentStatus()
   await addAppointmentPeriodIndex()
+  await addBarberProfilePhotos()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {
   await databaseConnection.end()

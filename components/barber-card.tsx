@@ -45,6 +45,7 @@ export function BarberCard({ barber, selected, onSelect, compact, showRating = t
             alt={`Foto de ${barber.name}`}
             fill
             className="object-cover"
+            style={{ objectPosition: `${barber.photoPositionX}% ${barber.photoPositionY}%` }}
           />
         </div>
         <div className="flex flex-col gap-1.5 p-4">

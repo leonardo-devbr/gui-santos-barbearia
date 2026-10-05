@@ -2,6 +2,7 @@ import 'server-only'
 
 import type { RowDataPacket } from 'mysql2/promise'
 import { getPool } from '@/lib/db'
+import { getBarberPhotoUrl } from '@/lib/barber-photo'
 import type { Barber, Service } from '@/lib/types'
 
 interface ServiceRow extends RowDataPacket {
@@ -21,6 +22,10 @@ interface BarberRow extends RowDataPacket {
   review_count: number
   bio: string
   photo_url: string
+  has_uploaded_photo: number | boolean
+  photo_position_x: number
+  photo_position_y: number
+  photo_revision: number
 }
 
 export async function getServices() {
@@ -43,7 +48,9 @@ export async function getServices() {
 
 export async function getBarbers() {
   const [rows] = await getPool().execute<BarberRow[]>(
-    `SELECT id, name, specialty, rating, review_count, bio, photo_url
+    `SELECT id, name, specialty, rating, review_count, bio, photo_url,
+       photo_data IS NOT NULL AS has_uploaded_photo,
+       photo_position_x, photo_position_y, photo_revision
      FROM barbers
      WHERE is_active = TRUE
      ORDER BY name`,
@@ -56,6 +63,13 @@ export async function getBarbers() {
     rating: row.rating,
     reviewCount: row.review_count,
     bio: row.bio,
-    photoUrl: row.photo_url,
+    photoUrl: getBarberPhotoUrl(
+      row.id,
+      row.photo_url,
+      Boolean(row.has_uploaded_photo),
+      row.photo_revision,
+    ),
+    photoPositionX: row.photo_position_x,
+    photoPositionY: row.photo_position_y,
   }))
 }

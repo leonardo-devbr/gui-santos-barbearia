@@ -7,6 +7,7 @@ import {
   summarizeAppointmentConflicts,
 } from '@/lib/admin-appointment-conflicts'
 import { getAuthenticatedStaff } from '@/lib/admin-auth'
+import { getBarberPhotoUrl } from '@/lib/barber-photo'
 import { getPool, withTransaction } from '@/lib/db'
 import type { AdminBarber } from '@/lib/types'
 
@@ -18,6 +19,10 @@ interface AdminBarberRow extends RowDataPacket {
   review_count: number
   bio: string
   photo_url: string
+  has_uploaded_photo: number | boolean
+  photo_position_x: number
+  photo_position_y: number
+  photo_revision: number
   is_active: number | boolean
 }
 
@@ -54,7 +59,14 @@ function mapBarber(row: AdminBarberRow): AdminBarber {
     rating: row.rating,
     reviewCount: row.review_count,
     bio: row.bio,
-    photoUrl: row.photo_url,
+    photoUrl: getBarberPhotoUrl(
+      row.id,
+      row.photo_url,
+      Boolean(row.has_uploaded_photo),
+      row.photo_revision,
+    ),
+    photoPositionX: row.photo_position_x,
+    photoPositionY: row.photo_position_y,
     isActive: Boolean(row.is_active),
   }
 }
@@ -65,6 +77,8 @@ function validateBarber(body: Record<string, unknown>) {
     typeof body.specialty === 'string' ? body.specialty.trim().replace(/\s+/g, ' ') : ''
   const bio = typeof body.bio === 'string' ? body.bio.trim().replace(/\s+/g, ' ') : ''
   const photoUrl = typeof body.photoUrl === 'string' ? body.photoUrl.trim() : ''
+  const photoPositionX = Number(body.photoPositionX ?? 50)
+  const photoPositionY = Number(body.photoPositionY ?? 50)
   const rating = Number(body.rating)
   const reviewCount = Number(body.reviewCount)
   const isActive = body.isActive === undefined ? true : body.isActive === true
@@ -81,6 +95,12 @@ function validateBarber(body: Record<string, unknown>) {
   if (!photoUrl.startsWith('/') || photoUrl.length > 512 || photoUrl.includes('..')) {
     throw new AdminBarberError('Use o caminho local de uma imagem, como /images/foto.jpg.', 422)
   }
+  if (!Number.isInteger(photoPositionX) || photoPositionX < 0 || photoPositionX > 100) {
+    throw new AdminBarberError('A posição horizontal da foto é inválida.', 422)
+  }
+  if (!Number.isInteger(photoPositionY) || photoPositionY < 0 || photoPositionY > 100) {
+    throw new AdminBarberError('A posição vertical da foto é inválida.', 422)
+  }
   if (!Number.isFinite(rating) || rating < 0 || rating > 5) {
     throw new AdminBarberError('A avaliação deve estar entre 0 e 5.', 422)
   }
@@ -95,6 +115,8 @@ function validateBarber(body: Record<string, unknown>) {
     reviewCount,
     bio,
     photoUrl,
+    photoPositionX,
+    photoPositionY,
     isActive,
   }
 }
@@ -103,7 +125,9 @@ export async function getAdminBarbers() {
   await requireAdminAccess()
 
   const [rows] = await getPool().execute<AdminBarberRow[]>(
-    `SELECT id, name, specialty, rating, review_count, bio, photo_url, is_active
+    `SELECT id, name, specialty, rating, review_count, bio, photo_url,
+       photo_data IS NOT NULL AS has_uploaded_photo,
+       photo_position_x, photo_position_y, photo_revision, is_active
      FROM barbers
      ORDER BY is_active DESC, name ASC`,
   )
@@ -124,8 +148,9 @@ export async function createAdminBarber(body: Record<string, unknown>) {
     const id = randomUUID()
     await connection.execute<ResultSetHeader>(
       `INSERT INTO barbers
-        (id, name, specialty, rating, review_count, bio, photo_url, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, name, specialty, rating, review_count, bio, photo_url,
+         photo_position_x, photo_position_y, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         input.name,
@@ -134,6 +159,8 @@ export async function createAdminBarber(body: Record<string, unknown>) {
         input.reviewCount,
         input.bio,
         input.photoUrl,
+        input.photoPositionX,
+        input.photoPositionY,
         input.isActive,
       ],
     )
@@ -174,7 +201,8 @@ export async function updateAdminBarber(id: string, body: Record<string, unknown
 
     await connection.execute<ResultSetHeader>(
       `UPDATE barbers
-       SET name = ?, specialty = ?, rating = ?, review_count = ?, bio = ?, photo_url = ?, is_active = ?
+       SET name = ?, specialty = ?, rating = ?, review_count = ?, bio = ?, photo_url = ?,
+           photo_position_x = ?, photo_position_y = ?, is_active = ?
        WHERE id = ?`,
       [
         input.name,
@@ -183,6 +211,8 @@ export async function updateAdminBarber(id: string, body: Record<string, unknown
         input.reviewCount,
         input.bio,
         input.photoUrl,
+        input.photoPositionX,
+        input.photoPositionY,
         input.isActive,
         id,
       ],
