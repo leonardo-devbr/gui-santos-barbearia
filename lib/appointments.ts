@@ -301,7 +301,7 @@ export async function getAvailability({
     excludedAppointmentId = ownedRows[0]?.id
   }
 
-  const parameters: Array<string> = [barberId, date]
+  const parameters: Array<string> = [date, barberId, customerId]
   let exclusionClause = ''
   if (excludedAppointmentId) {
     exclusionClause = 'AND id <> ?'
@@ -312,9 +312,9 @@ export async function getAvailability({
     pool.execute<BusySlotRow[]>(
       `SELECT appointment_time, duration_minutes
        FROM appointments
-       WHERE barber_id = ?
-         AND appointment_date = ?
+       WHERE appointment_date = ?
          AND status = 'confirmado'
+         AND (barber_id = ? OR customer_id = ?)
          ${exclusionClause}`,
       parameters,
     ),
@@ -401,7 +401,7 @@ export async function getAvailabilityForPeriod({
     excludedAppointmentId = ownedRows[0]?.id
   }
 
-  const busyParameters: string[] = [barberId, from, to]
+  const busyParameters: string[] = [from, to, barberId, customerId]
   let exclusionClause = ''
   if (excludedAppointmentId) {
     exclusionClause = 'AND id <> ?'
@@ -412,9 +412,9 @@ export async function getAvailabilityForPeriod({
     pool.execute<PeriodBusySlotRow[]>(
       `SELECT appointment_date, appointment_time, duration_minutes
        FROM appointments
-       WHERE barber_id = ?
-         AND appointment_date BETWEEN ? AND ?
+       WHERE appointment_date BETWEEN ? AND ?
          AND status = 'confirmado'
+         AND (barber_id = ? OR customer_id = ?)
          ${exclusionClause}`,
       busyParameters,
     ),

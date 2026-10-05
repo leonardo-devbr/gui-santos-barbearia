@@ -434,6 +434,84 @@ describe('agendamentos com MySQL', () => {
     expect(slots.find((slot) => slot.time === '10:00')?.available).toBe(true)
   })
 
+  it('oculta conflitos do próprio cliente e libera somente sua remarcação', async () => {
+    const customerId = await createCustomer('disponibilidade-cliente')
+    const otherCustomerId = await createCustomer('disponibilidade-terceiro')
+    const date = findNextOpenDate()
+    const appointmentId = await appointmentModule.createAppointment(
+      customerId,
+      appointmentInput(date, '11:00', 'vitor'),
+    )
+    const foreignAppointmentId = await appointmentModule.createAppointment(
+      otherCustomerId,
+      appointmentInput(date, '15:00', 'vitor'),
+    )
+
+    const slots = await appointmentModule.getAvailability({
+      customerId,
+      serviceId: 'corte',
+      barberId: 'guilherme',
+      date,
+    })
+    expect(slots.find((slot) => slot.time === '11:00')?.available).toBe(false)
+    expect(slots.find((slot) => slot.time === '11:30')?.available).toBe(false)
+    expect(slots.find((slot) => slot.time === '15:00')?.available).toBe(true)
+
+    const reschedulingSlots = await appointmentModule.getAvailability({
+      customerId,
+      appointmentId,
+      serviceId: 'corte',
+      barberId: 'guilherme',
+      date,
+    })
+    expect(reschedulingSlots.find((slot) => slot.time === '11:00')?.available).toBe(true)
+    expect(reschedulingSlots.find((slot) => slot.time === '11:30')?.available).toBe(true)
+
+    const foreignReschedulingSlots = await appointmentModule.getAvailability({
+      customerId,
+      appointmentId: foreignAppointmentId,
+      serviceId: 'corte',
+      barberId: 'guilherme',
+      date,
+    })
+    expect(foreignReschedulingSlots.find((slot) => slot.time === '11:00')?.available).toBe(false)
+  })
+
+  it('reflete o conflito do cliente no calendário mensal e exclui sua remarcação', async () => {
+    const customerId = await createCustomer('calendario-cliente')
+    const date = findNextOpenDate()
+    const weekday = new Date(`${date}T12:00:00.000Z`).getUTCDay()
+    await applicationPool.execute<ResultSetHeader>(
+      `UPDATE business_hours
+       SET is_open = TRUE, open_time = '09:00:00', close_time = '10:00:00'
+       WHERE weekday = ?`,
+      [weekday],
+    )
+    const appointmentId = await appointmentModule.createAppointment(
+      customerId,
+      appointmentInput(date, '09:00', 'vitor'),
+    )
+
+    const [day] = await appointmentModule.getAvailabilityForPeriod({
+      customerId,
+      serviceId: 'corte',
+      barberId: 'guilherme',
+      from: date,
+      to: date,
+    })
+    expect(day).toEqual({ date, status: 'full' })
+
+    const [reschedulingDay] = await appointmentModule.getAvailabilityForPeriod({
+      customerId,
+      appointmentId,
+      serviceId: 'corte',
+      barberId: 'guilherme',
+      from: date,
+      to: date,
+    })
+    expect(reschedulingDay).toEqual({ date, status: 'available' })
+  })
+
   it('resume um período do calendário distinguindo dias fechados, lotados e disponíveis', async () => {
     const customerId = await createCustomer('calendario')
     const from = addDaysToIsoDate(getTodayInSaoPaulo(), 1)
