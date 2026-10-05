@@ -15,7 +15,13 @@ export async function PATCH(request: Request, context: RouteContext) {
     const barber = await updateAdminBarber(id, body)
     return NextResponse.json({ barber, message: 'Barbeiro atualizado com sucesso.' })
   } catch (error) {
-    if (error instanceof AdminBarberError) return errorResponse(error.message, error.status)
+    if (error instanceof AdminBarberError) {
+      return errorResponse(
+        error.message,
+        error.status,
+        error.field ? { [error.field]: error.message } : undefined,
+      )
+    }
     return internalErrorResponse(error)
   }
 }

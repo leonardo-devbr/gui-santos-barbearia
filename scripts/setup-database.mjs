@@ -364,6 +364,21 @@ async function addBarberProfilePhotos() {
   ])
 }
 
+async function addBarberContactProfile() {
+  const migrationName = '20261005_barber_contact_profile'
+  if (await hasSchemaMigration(migrationName)) return
+
+  if (!(await hasBarberColumn('phone'))) {
+    await databaseConnection.query(
+      "ALTER TABLE barbers ADD COLUMN phone VARCHAR(11) NOT NULL DEFAULT '' AFTER name",
+    )
+  }
+
+  await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+    migrationName,
+  ])
+}
+
 try {
   await databaseConnection.query(schema)
   await migrateCustomerEmailVerification()
@@ -374,6 +389,7 @@ try {
   await removePendingAppointmentStatus()
   await addAppointmentPeriodIndex()
   await addBarberProfilePhotos()
+  await addBarberContactProfile()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {
   await databaseConnection.end()

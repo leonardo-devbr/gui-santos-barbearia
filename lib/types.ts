@@ -17,6 +17,7 @@ export interface AdminService extends Service {
 export interface Barber {
   id: string
   name: string
+  phone: string
   specialty: string
   rating: number
   reviewCount: number
@@ -28,6 +29,18 @@ export interface Barber {
 
 export interface AdminBarber extends Barber {
   isActive: boolean
+}
+
+export interface BarberProfile {
+  id: string
+  name: string
+  email: string
+  phone: string
+  specialty: string
+  bio: string
+  photoUrl: string
+  photoPositionX: number
+  photoPositionY: number
 }
 
 export type AppointmentStatus = 'confirmado' | 'concluido' | 'cancelado'

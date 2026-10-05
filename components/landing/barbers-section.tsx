@@ -1,9 +1,10 @@
 import Link from 'next/link'
 import Image from 'next/image'
-import { Star } from 'lucide-react'
+import { MessageCircle, Phone, Star } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { getLoginHref } from '@/lib/navigation'
 import type { Barber } from '@/lib/types'
+import { formatPhone } from '@/lib/validation'
 
 export function BarbersSection({ barbers }: { barbers: Barber[] }) {
   return (
@@ -34,6 +35,30 @@ export function BarbersSection({ barbers }: { barbers: Barber[] }) {
                 </span>
               </div>
               <p className="text-sm text-muted-foreground">{barber.specialty}</p>
+              <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-muted-foreground">
+                {barber.bio}
+              </p>
+              {barber.phone && (
+                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm">
+                  <a
+                    href={`tel:+55${barber.phone}`}
+                    className="inline-flex items-center gap-1.5 text-primary transition-colors hover:text-primary/80"
+                  >
+                    <Phone className="size-4" aria-hidden="true" />
+                    {formatPhone(barber.phone)}
+                  </a>
+                  <a
+                    href={`https://wa.me/55${barber.phone}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-primary transition-colors hover:text-primary/80"
+                    aria-label={`Conversar com ${barber.name} pelo WhatsApp`}
+                  >
+                    <MessageCircle className="size-4" aria-hidden="true" />
+                    WhatsApp
+                  </a>
+                </div>
+              )}
             </div>
           </div>
         ))}

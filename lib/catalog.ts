@@ -17,6 +17,7 @@ interface ServiceRow extends RowDataPacket {
 interface BarberRow extends RowDataPacket {
   id: string
   name: string
+  phone: string
   specialty: string
   rating: number
   review_count: number
@@ -48,7 +49,7 @@ export async function getServices() {
 
 export async function getBarbers() {
   const [rows] = await getPool().execute<BarberRow[]>(
-    `SELECT id, name, specialty, rating, review_count, bio, photo_url,
+    `SELECT id, name, phone, specialty, rating, review_count, bio, photo_url,
        photo_data IS NOT NULL AS has_uploaded_photo,
        photo_position_x, photo_position_y, photo_revision
      FROM barbers
@@ -59,6 +60,7 @@ export async function getBarbers() {
   return rows.map<Barber>((row) => ({
     id: row.id,
     name: row.name,
+    phone: row.phone,
     specialty: row.specialty,
     rating: row.rating,
     reviewCount: row.review_count,

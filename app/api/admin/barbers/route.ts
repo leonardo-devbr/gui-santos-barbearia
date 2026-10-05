@@ -10,7 +10,13 @@ export async function POST(request: Request) {
     const barber = await createAdminBarber(body)
     return NextResponse.json({ barber, message: 'Barbeiro criado com sucesso.' }, { status: 201 })
   } catch (error) {
-    if (error instanceof AdminBarberError) return errorResponse(error.message, error.status)
+    if (error instanceof AdminBarberError) {
+      return errorResponse(
+        error.message,
+        error.status,
+        error.field ? { [error.field]: error.message } : undefined,
+      )
+    }
     return internalErrorResponse(error)
   }
 }

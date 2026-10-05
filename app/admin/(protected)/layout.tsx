@@ -4,6 +4,7 @@ import {
   CalendarDays,
   CalendarOff,
   LayoutDashboard,
+  CircleUserRound,
   Scissors,
   Settings,
   ShieldCheck,
@@ -56,6 +57,15 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
               <CalendarOff className="size-4" />
               {isAdmin ? 'Bloqueios' : 'Meus bloqueios'}
             </Link>
+            {!isAdmin && (
+              <Link
+                href="/admin/perfil"
+                className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <CircleUserRound className="size-4" />
+                Meu perfil
+              </Link>
+            )}
             {isAdmin && (
               <>
                 <Link
