@@ -36,7 +36,13 @@ export async function POST(request: Request) {
     const user = await createStaffAccount(body)
     return NextResponse.json({ user, message: 'Acesso criado com sucesso.' }, { status: 201 })
   } catch (error) {
-    if (error instanceof AdminUserError) return errorResponse(error.message, error.status)
+    if (error instanceof AdminUserError) {
+      return errorResponse(
+        error.message,
+        error.status,
+        error.field ? { [error.field]: error.message } : undefined,
+      )
+    }
     return internalErrorResponse(error)
   }
 }

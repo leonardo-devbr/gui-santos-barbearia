@@ -10,7 +10,13 @@ export async function POST(request: Request) {
     const service = await createAdminService(body)
     return NextResponse.json({ service, message: 'Serviço criado com sucesso.' }, { status: 201 })
   } catch (error) {
-    if (error instanceof AdminServiceError) return errorResponse(error.message, error.status)
+    if (error instanceof AdminServiceError) {
+      return errorResponse(
+        error.message,
+        error.status,
+        error.field ? { [error.field]: error.message } : undefined,
+      )
+    }
     return internalErrorResponse(error)
   }
 }

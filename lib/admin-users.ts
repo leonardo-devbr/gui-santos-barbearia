@@ -3,6 +3,7 @@ import 'server-only'
 import { randomUUID } from 'node:crypto'
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { getAuthenticatedStaff, getCurrentStaffSessionTokenHash } from '@/lib/admin-auth'
+import type { AdminUserFormField } from '@/lib/admin-form-validation'
 import { hashPassword, verifyPassword } from '@/lib/auth'
 import { getPool, withTransaction } from '@/lib/db'
 import type { StaffAccount, StaffRole } from '@/lib/types'
@@ -41,6 +42,7 @@ export class AdminUserError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly field?: AdminUserFormField,
   ) {
     super(message)
   }
@@ -73,10 +75,10 @@ function validateIdentity(body: Record<string, unknown>) {
   const email = typeof body.email === 'string' ? normalizeEmail(body.email) : ''
 
   if (name.length < 3 || name.length > 80) {
-    throw new AdminUserError('O nome deve ter entre 3 e 80 caracteres.', 422)
+    throw new AdminUserError('O nome deve ter entre 3 e 80 caracteres.', 422, 'name')
   }
   if (!isValidEmail(email) || email.length > 254) {
-    throw new AdminUserError('Informe um e-mail válido.', 422)
+    throw new AdminUserError('Informe um e-mail válido.', 422, 'email')
   }
   return { name, email }
 }
@@ -84,12 +86,12 @@ function validateIdentity(body: Record<string, unknown>) {
 function validateAccess(body: Record<string, unknown>) {
   const role = body.role
   if (role !== 'admin' && role !== 'barber') {
-    throw new AdminUserError('Selecione um tipo de acesso válido.', 422)
+    throw new AdminUserError('Selecione um tipo de acesso válido.', 422, 'role')
   }
 
   const rawBarberId = typeof body.barberId === 'string' ? body.barberId.trim() : ''
   if (role === 'barber' && (!rawBarberId || rawBarberId.length > 64)) {
-    throw new AdminUserError('Vincule a conta a um barbeiro.', 422)
+    throw new AdminUserError('Vincule a conta a um barbeiro.', 422, 'barberId')
   }
 
   return {
@@ -110,6 +112,7 @@ function validatePassword(value: unknown, required: boolean) {
     throw new AdminUserError(
       'A senha deve ter entre 12 e 128 caracteres, incluindo uma letra e um número.',
       422,
+      'password',
     )
   }
   return password
@@ -123,7 +126,11 @@ async function requireCurrentAdminPassword(
 ) {
   const password = typeof value === 'string' ? value : ''
   if (!password || password.length > MAX_PASSWORD_LENGTH) {
-    throw new AdminUserError('Informe sua senha atual para confirmar esta operação.', 422)
+    throw new AdminUserError(
+      'Informe sua senha atual para confirmar esta operação.',
+      422,
+      'currentPassword',
+    )
   }
 
   const [rows] = await connection.execute<PasswordRow[]>(
@@ -141,7 +148,7 @@ async function requireCurrentAdminPassword(
   )
   if (!rows[0]) throw new AdminUserError('Acesso administrativo não autorizado.', 401)
   if (!(await verifyPassword(password, rows[0].password_hash))) {
-    throw new AdminUserError('A senha atual não confere.', 403)
+    throw new AdminUserError('A senha atual não confere.', 403, 'currentPassword')
   }
 }
 
@@ -156,7 +163,7 @@ async function lockBarber(
     'SELECT id, name FROM barbers WHERE id = ? LIMIT 1 FOR UPDATE',
     [barberId],
   )
-  if (!rows[0]) throw new AdminUserError('Barbeiro não encontrado.', 422)
+  if (!rows[0]) throw new AdminUserError('Barbeiro não encontrado.', 422, 'barberId')
   return rows[0]
 }
 
@@ -170,7 +177,9 @@ async function ensureUniqueAccess(
     `SELECT id FROM staff_users WHERE email = ? ${excludedId ? 'AND id <> ?' : ''} LIMIT 1 FOR UPDATE`,
     excludedId ? [email, excludedId] : [email],
   )
-  if (emailRows[0]) throw new AdminUserError('Já existe uma conta com este e-mail.', 409)
+  if (emailRows[0]) {
+    throw new AdminUserError('Já existe uma conta com este e-mail.', 409, 'email')
+  }
 
   if (!barberId) return
   const [barberRows] = await connection.execute<IdRow[]>(
@@ -178,7 +187,7 @@ async function ensureUniqueAccess(
     excludedId ? [barberId, excludedId] : [barberId],
   )
   if (barberRows[0]) {
-    throw new AdminUserError('Este barbeiro já possui uma conta de acesso.', 409)
+    throw new AdminUserError('Este barbeiro já possui uma conta de acesso.', 409, 'barberId')
   }
 }
 

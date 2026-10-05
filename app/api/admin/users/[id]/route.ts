@@ -41,7 +41,13 @@ export async function PATCH(request: Request, context: RouteContext) {
     const result = await updateStaffAccount(id, body)
     return NextResponse.json({ ...result, message: 'Acesso atualizado com sucesso.' })
   } catch (error) {
-    if (error instanceof AdminUserError) return errorResponse(error.message, error.status)
+    if (error instanceof AdminUserError) {
+      return errorResponse(
+        error.message,
+        error.status,
+        error.field ? { [error.field]: error.message } : undefined,
+      )
+    }
     return internalErrorResponse(error)
   }
 }

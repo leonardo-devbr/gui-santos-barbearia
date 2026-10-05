@@ -7,14 +7,21 @@ import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
+import {
+  type AdminUserFormErrors,
+  type AdminUserFormField,
+  validateAdminUserForm,
+} from '@/lib/admin-form-validation'
 import type { AdminBarber, StaffAccount, StaffRole } from '@/lib/types'
 
 interface ApiResponse {
   user?: StaffAccount
   invalidatesCurrentSession?: boolean
   message?: string
+  errors?: AdminUserFormErrors
 }
 
 function sortUsers(users: StaffAccount[]) {
@@ -37,18 +44,35 @@ export function AdminUsersManager({
   const [users, setUsers] = useState(initial)
   const [editing, setEditing] = useState<StaffAccount | null>(null)
   const [role, setRole] = useState<StaffRole>('barber')
+  const [errors, setErrors] = useState<AdminUserFormErrors>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [formKey, setFormKey] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  function clearError(field: AdminUserFormField) {
+    setErrors((current) => {
+      if (!current[field]) return current
+
+      const next = { ...current }
+      delete next[field]
+      return next
+    })
+    setSubmitError(null)
+  }
 
   function startCreating() {
     setEditing(null)
     setRole('barber')
+    setErrors({})
+    setSubmitError(null)
     setFormKey((current) => current + 1)
   }
 
   function startEditing(user: StaffAccount) {
     setEditing(user)
     setRole(user.role)
+    setErrors({})
+    setSubmitError(null)
     setFormKey((current) => current + 1)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -56,12 +80,27 @@ export function AdminUsersManager({
   async function saveUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
-    const password = String(data.get('password') ?? '')
-    const confirmation = String(data.get('passwordConfirmation') ?? '')
-    if (password !== confirmation) {
-      toast.error('A confirmação da senha não corresponde.')
+    const validation = validateAdminUserForm(
+      {
+        role,
+        barberId: String(data.get('barberId') ?? ''),
+        name: String(data.get('name') ?? ''),
+        email: String(data.get('email') ?? ''),
+        password: String(data.get('password') ?? ''),
+        passwordConfirmation: String(data.get('passwordConfirmation') ?? ''),
+        currentPassword: String(data.get('currentPassword') ?? ''),
+      },
+      Boolean(editing),
+    )
+
+    if (Object.keys(validation.errors).length > 0) {
+      setErrors(validation.errors)
+      setSubmitError('Revise os campos destacados para continuar.')
       return
     }
+
+    setErrors({})
+    setSubmitError(null)
     setIsSubmitting(true)
 
     try {
@@ -72,12 +111,7 @@ export function AdminUsersManager({
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({
-            name: data.get('name'),
-            email: data.get('email'),
-            password,
-            role,
-            barberId: role === 'barber' ? data.get('barberId') : null,
-            currentPassword: data.get('currentPassword'),
+            ...validation.data,
             isActive: editing ? editing.isCurrent || data.get('isActive') === 'on' : true,
           }),
         },
@@ -85,7 +119,8 @@ export function AdminUsersManager({
       const result = (await response.json().catch(() => null)) as ApiResponse | null
 
       if (!response.ok || !result?.user) {
-        toast.error(result?.message ?? 'Não foi possível salvar o acesso.')
+        if (result?.errors) setErrors(result.errors)
+        setSubmitError(result?.message ?? 'Não foi possível salvar o acesso. Tente novamente.')
         return
       }
 
@@ -106,9 +141,11 @@ export function AdminUsersManager({
       toast.success(editing ? 'Acesso atualizado.' : 'Acesso criado.')
       setEditing(null)
       setRole('barber')
+      setErrors({})
+      setSubmitError(null)
       setFormKey((current) => current + 1)
     } catch {
-      toast.error('Não foi possível conectar ao servidor.')
+      setSubmitError('Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.')
     } finally {
       setIsSubmitting(false)
     }
@@ -126,7 +163,13 @@ export function AdminUsersManager({
     <div className="grid gap-8 xl:grid-cols-[minmax(320px,400px)_1fr] xl:items-start">
       <Card>
         <CardContent>
-          <form key={formKey} className="flex flex-col gap-5" onSubmit={saveUser}>
+          <form
+            key={formKey}
+            className="flex flex-col gap-5"
+            onSubmit={saveUser}
+            noValidate
+            aria-busy={isSubmitting}
+          >
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="font-serif text-xl text-card-foreground">
@@ -143,89 +186,168 @@ export function AdminUsersManager({
               )}
             </div>
 
-            <label className="flex flex-col gap-1.5 text-sm font-medium">
-              Tipo de acesso
-              <select
-                value={role}
-                onChange={(event) => setRole(event.target.value as StaffRole)}
-                disabled={editing?.isCurrent}
-                className="h-9 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/50 disabled:opacity-60"
-              >
-                <option value="barber">Barbeiro — somente a própria agenda</option>
-                <option value="admin">Administrador — acesso completo</option>
-              </select>
-            </label>
-
-            {role === 'barber' && (
-              <label className="flex flex-col gap-1.5 text-sm font-medium">
-                Perfil do barbeiro
+            <FieldGroup>
+              <Field data-invalid={Boolean(errors.role)}>
+                <FieldLabel htmlFor="staff-role">Tipo de acesso</FieldLabel>
                 <select
-                  name="barberId"
-                  defaultValue={editing?.barberId ?? ''}
-                  required
-                  className="h-9 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/50"
+                  id="staff-role"
+                  value={role}
+                  onChange={(event) => {
+                    const nextRole = event.target.value as StaffRole
+                    setRole(nextRole)
+                    clearError('role')
+                    if (nextRole === 'admin') clearError('barberId')
+                  }}
+                  disabled={editing?.isCurrent}
+                  className="h-9 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 disabled:opacity-60"
+                  aria-invalid={Boolean(errors.role)}
+                  aria-describedby={errors.role ? 'staff-role-error' : undefined}
                 >
-                  <option value="" disabled>
-                    Selecione o profissional
-                  </option>
-                  {barbers.map((barber) => {
-                    const unavailable =
-                      assignedBarberIds.has(barber.id) ||
-                      (!barber.isActive && barber.id !== editing?.barberId)
-                    return (
-                      <option key={barber.id} value={barber.id} disabled={unavailable}>
-                        {barber.name}
-                        {!barber.isActive ? ' — inativo' : unavailable ? ' — já possui acesso' : ''}
-                      </option>
-                    )
-                  })}
+                  <option value="barber">Barbeiro — somente a própria agenda</option>
+                  <option value="admin">Administrador — acesso completo</option>
                 </select>
-              </label>
-            )}
+                <FieldError id="staff-role-error">{errors.role}</FieldError>
+              </Field>
 
-            <label className="flex flex-col gap-1.5 text-sm font-medium">
-              Nome de exibição
-              <Input name="name" defaultValue={editing?.name ?? ''} minLength={3} maxLength={80} required />
-            </label>
-            <label className="flex flex-col gap-1.5 text-sm font-medium">
-              E-mail de acesso
-              <Input name="email" type="email" defaultValue={editing?.email ?? ''} maxLength={254} required />
-            </label>
-            <label className="flex flex-col gap-1.5 text-sm font-medium">
-              {editing ? 'Nova senha (opcional)' : 'Senha inicial'}
-              <PasswordInput
-                name="password"
-                minLength={12}
-                maxLength={128}
-                autoComplete="new-password"
-                required={!editing}
-              />
-              <span className="text-xs font-normal text-muted-foreground">
-                Mínimo de 12 caracteres, com uma letra e um número.
-              </span>
-            </label>
-            <label className="flex flex-col gap-1.5 text-sm font-medium">
-              Confirmar senha
-              <PasswordInput
-                name="passwordConfirmation"
-                minLength={12}
-                maxLength={128}
-                autoComplete="new-password"
-                required={!editing}
-              />
-            </label>
-            <label className="flex flex-col gap-1.5 text-sm font-medium">
-              Sua senha atual de administrador
-              <PasswordInput
-                name="currentPassword"
-                maxLength={128}
-                autoComplete="current-password"
-                required
-              />
-              <span className="text-xs font-normal text-muted-foreground">
-                Confirma sua identidade antes de alterar os acessos da equipe.
-              </span>
-            </label>
+              {role === 'barber' && (
+                <Field data-invalid={Boolean(errors.barberId)}>
+                  <FieldLabel htmlFor="staff-barber">Perfil do barbeiro</FieldLabel>
+                  <select
+                    id="staff-barber"
+                    name="barberId"
+                    defaultValue={editing?.barberId ?? ''}
+                    required
+                    className="h-9 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20"
+                    aria-invalid={Boolean(errors.barberId)}
+                    aria-describedby={errors.barberId ? 'staff-barber-error' : undefined}
+                    onChange={() => clearError('barberId')}
+                  >
+                    <option value="" disabled>
+                      Selecione o profissional
+                    </option>
+                    {barbers.map((barber) => {
+                      const unavailable =
+                        assignedBarberIds.has(barber.id) ||
+                        (!barber.isActive && barber.id !== editing?.barberId)
+                      return (
+                        <option key={barber.id} value={barber.id} disabled={unavailable}>
+                          {barber.name}
+                          {!barber.isActive ? ' — inativo' : unavailable ? ' — já possui acesso' : ''}
+                        </option>
+                      )
+                    })}
+                  </select>
+                  <FieldError id="staff-barber-error">{errors.barberId}</FieldError>
+                </Field>
+              )}
+
+              <Field data-invalid={Boolean(errors.name)}>
+                <FieldLabel htmlFor="staff-name">Nome de exibição</FieldLabel>
+                <Input
+                  id="staff-name"
+                  name="name"
+                  autoComplete="name"
+                  defaultValue={editing?.name ?? ''}
+                  minLength={3}
+                  maxLength={80}
+                  aria-invalid={Boolean(errors.name)}
+                  aria-describedby={errors.name ? 'staff-name-error' : undefined}
+                  onValueChange={() => clearError('name')}
+                  required
+                />
+                <FieldError id="staff-name-error">{errors.name}</FieldError>
+              </Field>
+
+              <Field data-invalid={Boolean(errors.email)}>
+                <FieldLabel htmlFor="staff-email">E-mail de acesso</FieldLabel>
+                <Input
+                  id="staff-email"
+                  name="email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  defaultValue={editing?.email ?? ''}
+                  maxLength={254}
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  aria-invalid={Boolean(errors.email)}
+                  aria-describedby={errors.email ? 'staff-email-error' : undefined}
+                  onValueChange={() => clearError('email')}
+                  required
+                />
+                <FieldError id="staff-email-error">{errors.email}</FieldError>
+              </Field>
+
+              <Field data-invalid={Boolean(errors.password)}>
+                <FieldLabel htmlFor="staff-password">
+                  {editing ? 'Nova senha (opcional)' : 'Senha inicial'}
+                </FieldLabel>
+                <PasswordInput
+                  id="staff-password"
+                  name="password"
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  placeholder="Mínimo de 12 caracteres"
+                  aria-invalid={Boolean(errors.password)}
+                  aria-describedby={errors.password ? 'staff-password-error' : 'staff-password-help'}
+                  onValueChange={() => clearError('password')}
+                  required={!editing}
+                />
+                {!errors.password && (
+                  <p id="staff-password-help" className="text-xs font-normal text-muted-foreground">
+                    Use ao menos 12 caracteres, incluindo uma letra e um número.
+                  </p>
+                )}
+                <FieldError id="staff-password-error">{errors.password}</FieldError>
+              </Field>
+
+              <Field data-invalid={Boolean(errors.passwordConfirmation)}>
+                <FieldLabel htmlFor="staff-password-confirmation">Confirmar senha</FieldLabel>
+                <PasswordInput
+                  id="staff-password-confirmation"
+                  name="passwordConfirmation"
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete="new-password"
+                  placeholder="Repita a senha"
+                  aria-invalid={Boolean(errors.passwordConfirmation)}
+                  aria-describedby={
+                    errors.passwordConfirmation ? 'staff-password-confirmation-error' : undefined
+                  }
+                  onValueChange={() => clearError('passwordConfirmation')}
+                  required={!editing}
+                />
+                <FieldError id="staff-password-confirmation-error">
+                  {errors.passwordConfirmation}
+                </FieldError>
+              </Field>
+
+              <Field data-invalid={Boolean(errors.currentPassword)}>
+                <FieldLabel htmlFor="staff-current-password">
+                  Sua senha atual de administrador
+                </FieldLabel>
+                <PasswordInput
+                  id="staff-current-password"
+                  name="currentPassword"
+                  maxLength={128}
+                  autoComplete="current-password"
+                  placeholder="Confirme sua senha atual"
+                  aria-invalid={Boolean(errors.currentPassword)}
+                  aria-describedby={
+                    errors.currentPassword ? 'staff-current-password-error' : 'staff-current-password-help'
+                  }
+                  onValueChange={() => clearError('currentPassword')}
+                  required
+                />
+                {!errors.currentPassword && (
+                  <p id="staff-current-password-help" className="text-xs font-normal text-muted-foreground">
+                    Confirma sua identidade antes de alterar os acessos da equipe.
+                  </p>
+                )}
+                <FieldError id="staff-current-password-error">{errors.currentPassword}</FieldError>
+              </Field>
+            </FieldGroup>
 
             {editing && (
               <label className="flex items-center gap-2 text-sm font-medium">
@@ -238,6 +360,15 @@ export function AdminUsersManager({
                 />
                 {editing.isCurrent ? 'Sua conta deve permanecer ativa' : 'Acesso ativo'}
               </label>
+            )}
+
+            {submitError && (
+              <p
+                role="alert"
+                className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+              >
+                {submitError}
+              </p>
             )}
 
             <Button type="submit" size="lg" disabled={isSubmitting}>

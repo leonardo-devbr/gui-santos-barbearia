@@ -15,7 +15,13 @@ export async function PATCH(request: Request, context: RouteContext) {
     const service = await updateAdminService(id, body)
     return NextResponse.json({ service, message: 'Serviço atualizado com sucesso.' })
   } catch (error) {
-    if (error instanceof AdminServiceError) return errorResponse(error.message, error.status)
+    if (error instanceof AdminServiceError) {
+      return errorResponse(
+        error.message,
+        error.status,
+        error.field ? { [error.field]: error.message } : undefined,
+      )
+    }
     return internalErrorResponse(error)
   }
 }

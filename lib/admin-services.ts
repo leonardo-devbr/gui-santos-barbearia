@@ -3,6 +3,7 @@ import 'server-only'
 import { randomUUID } from 'node:crypto'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { getAuthenticatedStaff } from '@/lib/admin-auth'
+import type { AdminServiceFormField } from '@/lib/admin-form-validation'
 import { getPool, withTransaction } from '@/lib/db'
 import type { AdminService, Service } from '@/lib/types'
 
@@ -26,6 +27,7 @@ export class AdminServiceError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly field?: AdminServiceFormField,
   ) {
     super(message)
   }
@@ -61,19 +63,19 @@ function validateService(body: Record<string, unknown>) {
   const isActive = body.isActive === undefined ? true : body.isActive === true
 
   if (name.length < 2 || name.length > 100) {
-    throw new AdminServiceError('O nome deve ter entre 2 e 100 caracteres.', 422)
+    throw new AdminServiceError('O nome deve ter entre 2 e 100 caracteres.', 422, 'name')
   }
   if (description.length < 3 || description.length > 255) {
-    throw new AdminServiceError('A descrição deve ter entre 3 e 255 caracteres.', 422)
+    throw new AdminServiceError('A descrição deve ter entre 3 e 255 caracteres.', 422, 'description')
   }
   if (!Number.isInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 240) {
-    throw new AdminServiceError('A duração deve ser de 5 a 240 minutos.', 422)
+    throw new AdminServiceError('A duração deve ser de 5 a 240 minutos.', 422, 'durationMinutes')
   }
   if (!Number.isFinite(price) || price <= 0 || price > 9999.99) {
-    throw new AdminServiceError('Informe um preço válido de até R$ 9.999,99.', 422)
+    throw new AdminServiceError('Informe um preço válido de até R$ 9.999,99.', 422, 'price')
   }
   if (!categories.includes(category as Service['category'])) {
-    throw new AdminServiceError('Selecione uma categoria válida.', 422)
+    throw new AdminServiceError('Selecione uma categoria válida.', 422, 'category')
   }
 
   return {
@@ -108,7 +110,9 @@ export async function createAdminService(body: Record<string, unknown>) {
       'SELECT id FROM services WHERE name = ? LIMIT 1 FOR UPDATE',
       [input.name],
     )
-    if (duplicates[0]) throw new AdminServiceError('Já existe um serviço com este nome.', 409)
+    if (duplicates[0]) {
+      throw new AdminServiceError('Já existe um serviço com este nome.', 409, 'name')
+    }
 
     const id = randomUUID()
     await connection.execute<ResultSetHeader>(
@@ -146,7 +150,9 @@ export async function updateAdminService(id: string, body: Record<string, unknow
       'SELECT id FROM services WHERE name = ? AND id <> ? LIMIT 1 FOR UPDATE',
       [input.name, id],
     )
-    if (duplicates[0]) throw new AdminServiceError('Já existe um serviço com este nome.', 409)
+    if (duplicates[0]) {
+      throw new AdminServiceError('Já existe um serviço com este nome.', 409, 'name')
+    }
 
     await connection.execute<ResultSetHeader>(
       `UPDATE services
