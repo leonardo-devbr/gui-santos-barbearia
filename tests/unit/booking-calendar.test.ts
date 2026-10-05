@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  getBookingAvailabilityPeriod,
   getBookableDays,
+  isBookingDayAvailability,
   MAX_BOOKING_DAYS_AHEAD,
 } from '@/lib/booking-calendar'
 import { addDaysToIsoDate } from '@/lib/date'
@@ -16,6 +18,26 @@ function openHour(weekday: number): BusinessHour {
 }
 
 describe('calendário de agendamento', () => {
+  it('limita a consulta mensal ao período permitido para agendamento', () => {
+    expect(getBookingAvailabilityPeriod('2026-09', '2026-09-21')).toEqual({
+      from: '2026-09-21',
+      to: '2026-09-30',
+    })
+    expect(getBookingAvailabilityPeriod('2026-12', '2026-09-21')).toEqual({
+      from: '2026-12-01',
+      to: '2026-12-20',
+    })
+    expect(getBookingAvailabilityPeriod('2026-08', '2026-09-21')).toBeNull()
+  })
+
+  it('valida somente estados reconhecidos de disponibilidade diária', () => {
+    expect(isBookingDayAvailability({ date: '2026-09-22', status: 'available' })).toBe(true)
+    expect(isBookingDayAvailability({ date: '2026-09-22', status: 'closed' })).toBe(true)
+    expect(isBookingDayAvailability({ date: '2026-09-22', status: 'full' })).toBe(true)
+    expect(isBookingDayAvailability({ date: '22/09/2026', status: 'available' })).toBe(false)
+    expect(isBookingDayAvailability({ date: '2026-09-22', status: 'unknown' })).toBe(false)
+  })
+
   it('inclui hoje e respeita os dias configurados no painel', () => {
     const days = getBookableDays('2026-09-21', [openHour(1)], 7)
 

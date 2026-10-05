@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
 import { BookingFlow } from '@/components/booking/booking-flow'
-import { getBusinessConfiguration } from '@/lib/business'
 import { getBarbers, getServices } from '@/lib/catalog'
 import { getTodayInSaoPaulo } from '@/lib/date'
 
@@ -15,10 +14,9 @@ export default async function AgendarPage({
 }) {
   const { agendamento, servico, barbeiro } = await searchParams
   const isRescheduling = Boolean(agendamento)
-  const [services, barbers, business] = await Promise.all([
+  const [services, barbers] = await Promise.all([
     getServices(),
     getBarbers(),
-    getBusinessConfiguration(),
   ])
 
   return (
@@ -35,7 +33,6 @@ export default async function AgendarPage({
       <BookingFlow
         services={services}
         barbers={barbers}
-        businessHours={business.hours}
         today={getTodayInSaoPaulo()}
         appointmentId={agendamento}
         initialServiceId={servico}

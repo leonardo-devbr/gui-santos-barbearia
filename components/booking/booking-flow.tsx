@@ -1,35 +1,39 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   CalendarDays,
   Check,
   ChevronLeft,
-  ChevronRight,
   Clock,
   LoaderCircle,
   Scissors,
   User,
 } from 'lucide-react'
+import { ptBR } from 'react-day-picker/locale'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Calendar } from '@/components/ui/calendar'
 import { Card, CardContent } from '@/components/ui/card'
 import { ServiceCard } from '@/components/service-card'
 import { BarberCard } from '@/components/barber-card'
-import { getBookableDays } from '@/lib/booking-calendar'
+import {
+  getBookingAvailabilityPeriod,
+  isBookingDayAvailability,
+  MAX_BOOKING_DAYS_AHEAD,
+  type BookingDayStatus,
+} from '@/lib/booking-calendar'
+import { addDaysToIsoDate } from '@/lib/date'
 import { cn } from '@/lib/utils'
 import { formatDateLong, formatPrice } from '@/lib/format'
-import type { Barber, BusinessHour, Service, TimeSlot } from '@/lib/types'
+import type { Barber, Service, TimeSlot } from '@/lib/types'
 
-const steps = ['Serviço', 'Barbeiro', 'Data', 'Horário', 'Confirmar'] as const
-
-const DATES_PER_PAGE = 12
+const steps = ['Serviço', 'Barbeiro', 'Data e horário', 'Confirmar'] as const
 
 interface BookingFlowProps {
   services: Service[]
   barbers: Barber[]
-  businessHours: BusinessHour[]
   today: string
   appointmentId?: string
   initialServiceId?: string
@@ -43,6 +47,7 @@ interface BookingResponse {
 interface AvailabilityResponse {
   message?: string
   slots?: unknown
+  days?: unknown
 }
 
 function isTimeSlot(value: unknown): value is TimeSlot {
@@ -56,20 +61,32 @@ function isTimeSlot(value: unknown): value is TimeSlot {
   )
 }
 
+function isoToLocalDate(value: string) {
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+function localDateToIso(value: Date) {
+  return [
+    value.getFullYear(),
+    String(value.getMonth() + 1).padStart(2, '0'),
+    String(value.getDate()).padStart(2, '0'),
+  ].join('-')
+}
+
+function getYearMonth(value: Date) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}`
+}
+
 export function BookingFlow({
   services,
   barbers,
-  businessHours,
   today,
   appointmentId,
   initialServiceId,
   initialBarberId,
 }: BookingFlowProps) {
   const router = useRouter()
-  const days = useMemo(
-    () => getBookableDays(today, businessHours),
-    [businessHours, today],
-  )
   const isRescheduling = Boolean(appointmentId)
   const validInitialServiceId = initialServiceId && services.some((service) => service.id === initialServiceId)
     ? initialServiceId
@@ -77,33 +94,124 @@ export function BookingFlow({
   const validInitialBarberId = initialBarberId && barbers.some((barber) => barber.id === initialBarberId)
     ? initialBarberId
     : undefined
+  const firstCalendarDate = useMemo(() => isoToLocalDate(today), [today])
+  const lastBookingDate = useMemo(
+    () => addDaysToIsoDate(today, MAX_BOOKING_DAYS_AHEAD),
+    [today],
+  )
+  const lastCalendarDate = useMemo(() => isoToLocalDate(lastBookingDate), [lastBookingDate])
 
   const [step, setStep] = useState(0)
-  const [datePage, setDatePage] = useState(0)
   const [serviceId, setServiceId] = useState<string | undefined>(validInitialServiceId)
   const [barberId, setBarberId] = useState<string | undefined>(validInitialBarberId)
   const [date, setDate] = useState<string | undefined>()
   const [time, setTime] = useState<string | undefined>()
+  const [calendarMonth, setCalendarMonth] = useState(firstCalendarDate)
+  const [calendarDays, setCalendarDays] = useState<Record<string, BookingDayStatus>>({})
+  const [calendarError, setCalendarError] = useState<string | null>(null)
+  const [calendarReloadKey, setCalendarReloadKey] = useState(0)
+  const [isLoadingCalendar, setIsLoadingCalendar] = useState(false)
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([])
   const [availabilityError, setAvailabilityError] = useState<string | null>(null)
   const [isLoadingSlots, setIsLoadingSlots] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const availabilityRequestId = useRef(0)
+  const calendarRequestId = useRef(0)
 
   const service = serviceId ? services.find((item) => item.id === serviceId) : undefined
   const barber = barberId ? barbers.find((item) => item.id === barberId) : undefined
-  const pageStart = datePage * DATES_PER_PAGE
-  const visibleDays = days.slice(pageStart, pageStart + DATES_PER_PAGE)
-  const hasPreviousDates = datePage > 0
-  const hasNextDates = pageStart + DATES_PER_PAGE < days.length
+  const selectedCalendarDate = useMemo(() => (date ? isoToLocalDate(date) : undefined), [date])
+  const closedDates = useMemo(
+    () =>
+      Object.entries(calendarDays)
+        .filter(([, status]) => status === 'closed')
+        .map(([iso]) => isoToLocalDate(iso)),
+    [calendarDays],
+  )
+  const availableDates = useMemo(
+    () =>
+      Object.entries(calendarDays)
+        .filter(([, status]) => status === 'available')
+        .map(([iso]) => isoToLocalDate(iso)),
+    [calendarDays],
+  )
+  const fullDates = useMemo(
+    () =>
+      Object.entries(calendarDays)
+        .filter(([, status]) => status === 'full')
+        .map(([iso]) => isoToLocalDate(iso)),
+    [calendarDays],
+  )
 
   const canAdvance =
     (step === 0 && Boolean(serviceId)) ||
     (step === 1 && Boolean(barberId)) ||
-    (step === 2 && Boolean(date)) ||
-    (step === 3 && Boolean(time)) ||
-    step === 4
+    (step === 2 && Boolean(date && time) && !isLoadingSlots) ||
+    step === 3
+
+  useEffect(() => {
+    if (step !== 2 || !serviceId || !barberId) return
+
+    const period = getBookingAvailabilityPeriod(getYearMonth(calendarMonth), today)
+    if (!period) return
+
+    const requestId = calendarRequestId.current + 1
+    calendarRequestId.current = requestId
+    const controller = new AbortController()
+    const params = new URLSearchParams({ serviceId, barberId, ...period })
+    if (appointmentId) params.set('appointmentId', appointmentId)
+
+    void (async () => {
+      setCalendarDays({})
+      setCalendarError(null)
+      setIsLoadingCalendar(true)
+
+      try {
+        const response = await fetch(`/api/availability?${params.toString()}`, {
+          credentials: 'include',
+          signal: controller.signal,
+        })
+        const result = (await response.json().catch(() => null)) as AvailabilityResponse | null
+
+        if (requestId !== calendarRequestId.current) return
+        if (!response.ok) {
+          setCalendarError(result?.message ?? 'Não foi possível consultar os dias disponíveis.')
+          return
+        }
+        if (!Array.isArray(result?.days) || !result.days.every(isBookingDayAvailability)) {
+          setCalendarError('O servidor retornou uma lista de dias inválida.')
+          return
+        }
+
+        const nextDays = Object.fromEntries(
+          result.days.map((day) => [day.date, day.status] as const),
+        )
+        setCalendarDays(nextDays)
+      } catch (error) {
+        if (
+          requestId === calendarRequestId.current &&
+          !(error instanceof DOMException && error.name === 'AbortError')
+        ) {
+          setCalendarError(
+            'Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.',
+          )
+        }
+      } finally {
+        if (requestId === calendarRequestId.current) setIsLoadingCalendar(false)
+      }
+    })()
+
+    return () => controller.abort()
+  }, [
+    appointmentId,
+    barberId,
+    calendarMonth,
+    calendarReloadKey,
+    serviceId,
+    step,
+    today,
+  ])
 
   function next() {
     if (canAdvance && step < steps.length - 1) setStep((s) => s + 1)
@@ -114,22 +222,36 @@ export function BookingFlow({
     else router.back()
   }
 
+  function resetAvailability() {
+    setDate(undefined)
+    setTime(undefined)
+    setCalendarMonth(firstCalendarDate)
+    setCalendarDays({})
+    setCalendarError(null)
+    setTimeSlots([])
+    setAvailabilityError(null)
+    setIsLoadingCalendar(false)
+    setIsLoadingSlots(false)
+    calendarRequestId.current += 1
+    availabilityRequestId.current += 1
+    setSubmitError(null)
+  }
+
   function selectService(nextServiceId: string) {
     if (nextServiceId === serviceId) return
     setServiceId(nextServiceId)
     setBarberId(undefined)
-    setDate(undefined)
-    setTime(undefined)
-    setTimeSlots([])
-    setAvailabilityError(null)
-    setIsLoadingSlots(false)
-    availabilityRequestId.current += 1
-    setSubmitError(null)
+    resetAvailability()
   }
 
   function selectBarber(nextBarberId: string) {
     if (nextBarberId === barberId) return
     setBarberId(nextBarberId)
+    resetAvailability()
+  }
+
+  function changeCalendarMonth(nextMonth: Date) {
+    setCalendarMonth(nextMonth)
     setDate(undefined)
     setTime(undefined)
     setTimeSlots([])
@@ -169,6 +291,13 @@ export function BookingFlow({
         return
       }
 
+      if (!result.slots.some((slot) => slot.available)) {
+        setCalendarDays((current) => ({ ...current, [selectedDate]: 'full' }))
+        setDate(undefined)
+        setAvailabilityError('Este dia não possui mais horários disponíveis. Escolha outra data.')
+        return
+      }
+
       setTimeSlots(result.slots)
     } catch {
       if (requestId === availabilityRequestId.current) {
@@ -180,6 +309,7 @@ export function BookingFlow({
   }
 
   function selectDate(nextDate: string) {
+    if (calendarDays[nextDate] !== 'available') return
     if (nextDate === date && (isLoadingSlots || timeSlots.length > 0)) return
     setDate(nextDate)
     setTime(undefined)
@@ -297,122 +427,214 @@ export function BookingFlow({
 
         {step === 2 && (
           <>
-            <h2 className="font-serif text-2xl text-foreground">Escolha a data</h2>
-            {days.length === 0 ? (
-              <div className="flex min-h-32 items-center justify-center rounded-xl border border-border bg-card p-5 text-center text-sm text-muted-foreground">
-                Não há dias de atendimento disponíveis nos próximos 90 dias.
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-                  {visibleDays.map((d) => (
-                    <button
-                      key={d.iso}
-                      type="button"
-                      aria-pressed={date === d.iso}
-                      onClick={() => selectDate(d.iso)}
-                      className={cn(
-                        'flex flex-col items-center gap-1 rounded-xl border p-3 transition-colors',
-                        date === d.iso
-                          ? 'border-primary bg-primary/10 text-foreground'
-                          : 'border-border bg-card text-muted-foreground hover:border-primary/50',
-                      )}
+            <div>
+              <h2 className="font-serif text-2xl text-foreground">Escolha a data e o horário</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Os horários disponíveis aparecem ao lado assim que você escolhe um dia.
+              </p>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-[minmax(20rem,27rem)_minmax(0,1fr)]">
+              <section
+                aria-labelledby="booking-calendar-title"
+                aria-busy={isLoadingCalendar}
+                className="rounded-2xl border border-border bg-card p-4 shadow-sm"
+              >
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 id="booking-calendar-title" className="text-sm font-semibold text-foreground">
+                    Dias disponíveis
+                  </h3>
+                  {isLoadingCalendar && (
+                    <span
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                      role="status"
                     >
-                      <span className="text-xs uppercase tracking-wide">
-                        {d.iso === today ? 'hoje' : d.weekday}
-                      </span>
-                      <span className="font-serif text-xl text-foreground">{d.day}</span>
-                      <span className="text-xs uppercase">{d.month}</span>
-                    </button>
-                  ))}
+                      <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+                      Consultando
+                    </span>
+                  )}
                 </div>
 
-                {days.length > DATES_PER_PAGE && (
-                  <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
-                    <p className="text-xs text-muted-foreground" aria-live="polite">
-                      Mostrando {pageStart + 1}–{Math.min(pageStart + DATES_PER_PAGE, days.length)} de{' '}
-                      {days.length} datas disponíveis
+                <Calendar
+                  mode="single"
+                  locale={ptBR}
+                  month={calendarMonth}
+                  onMonthChange={changeCalendarMonth}
+                  selected={selectedCalendarDate}
+                  onSelect={(selectedDate) => {
+                    if (selectedDate) selectDate(localDateToIso(selectedDate))
+                  }}
+                  startMonth={new Date(
+                    firstCalendarDate.getFullYear(),
+                    firstCalendarDate.getMonth(),
+                    1,
+                  )}
+                  endMonth={new Date(
+                    lastCalendarDate.getFullYear(),
+                    lastCalendarDate.getMonth(),
+                    1,
+                  )}
+                  today={firstCalendarDate}
+                  showOutsideDays={false}
+                  navLayout="around"
+                  disabled={(candidate) => {
+                    const iso = localDateToIso(candidate)
+                    return (
+                      iso < today ||
+                      iso > lastBookingDate ||
+                      isLoadingCalendar ||
+                      Boolean(calendarError) ||
+                      calendarDays[iso] !== 'available'
+                    )
+                  }}
+                  modifiers={{ available: availableDates, closed: closedDates, full: fullDates }}
+                  modifiersClassNames={{
+                    available: '[&_button]:ring-1 [&_button]:ring-primary/25',
+                    closed:
+                      '[&_button]:bg-muted/60 [&_button]:text-muted-foreground [&_button]:line-through',
+                    full:
+                      '[&_button]:bg-destructive/10 [&_button]:text-destructive [&_button]:line-through',
+                  }}
+                  labels={{
+                    labelDayButton: (candidate, modifiers) => {
+                      const label = candidate.toLocaleDateString('pt-BR', {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                      })
+                      if (modifiers.closed) return `${label}, barbearia fechada`
+                      if (modifiers.full) return `${label}, sem horários disponíveis`
+                      if (modifiers.selected) return `${label}, selecionado`
+                      if (modifiers.available) return `${label}, disponível`
+                      return `${label}, indisponível`
+                    },
+                  }}
+                  footer={
+                    date
+                      ? `${formatDateLong(date)} selecionado. Escolha um horário disponível.`
+                      : 'Escolha um dia disponível para consultar os horários.'
+                  }
+                  className="mx-auto w-full bg-transparent p-0 [--cell-size:2.5rem] sm:[--cell-size:3rem]"
+                  classNames={{ root: 'w-full', month: 'w-full', month_grid: 'w-full' }}
+                />
+
+                <div
+                  className="mt-4 flex flex-wrap gap-x-4 gap-y-2 border-t border-border pt-3 text-xs text-muted-foreground"
+                  aria-label="Legenda do calendário"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span className="size-2 rounded-full bg-primary" aria-hidden="true" />
+                    Disponível
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      className="size-2 rounded-full bg-muted-foreground/50"
+                      aria-hidden="true"
+                    />
+                    Fechado
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="size-2 rounded-full bg-destructive/70" aria-hidden="true" />
+                    Sem vagas
+                  </span>
+                </div>
+
+                {calendarError && (
+                  <div className="mt-4 flex flex-col items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3">
+                    <p role="alert" className="text-sm text-destructive">
+                      {calendarError}
                     </p>
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={!hasPreviousDates}
-                        onClick={() => setDatePage((current) => current - 1)}
-                      >
-                        <ChevronLeft aria-hidden="true" />
-                        Datas anteriores
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={!hasNextDates}
-                        onClick={() => setDatePage((current) => current + 1)}
-                      >
-                        Próximas datas
-                        <ChevronRight aria-hidden="true" />
-                      </Button>
-                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCalendarReloadKey((current) => current + 1)}
+                    >
+                      Tentar novamente
+                    </Button>
                   </div>
                 )}
-              </>
-            )}
+              </section>
+
+              <section
+                aria-labelledby="booking-times-title"
+                aria-busy={isLoadingSlots}
+                className="min-h-80 rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5"
+              >
+                <div className="mb-4">
+                  <h3 id="booking-times-title" className="font-serif text-xl text-foreground">
+                    {date ? `Horários para ${formatDateLong(date)}` : 'Horários disponíveis'}
+                  </h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Todos os horários estão no fuso de Brasília.
+                  </p>
+                </div>
+
+                {isLoadingSlots ? (
+                  <div
+                    className="flex min-h-48 items-center justify-center gap-2 text-sm text-muted-foreground"
+                    role="status"
+                  >
+                    <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                    Consultando horários disponíveis...
+                  </div>
+                ) : availabilityError ? (
+                  <div className="flex min-h-48 flex-col items-center justify-center gap-3 text-center">
+                    <p role="alert" className="text-sm text-destructive">
+                      {availabilityError}
+                    </p>
+                    {date && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void loadAvailability(date)}
+                      >
+                        Tentar novamente
+                      </Button>
+                    )}
+                  </div>
+                ) : !date ? (
+                  <div className="flex min-h-48 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
+                    <CalendarDays className="size-8 text-primary/70" aria-hidden="true" />
+                    Selecione um dia disponível no calendário.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-4 2xl:grid-cols-5">
+                    {timeSlots.map((slot) => (
+                      <button
+                        key={slot.time}
+                        type="button"
+                        disabled={!slot.available}
+                        aria-pressed={time === slot.time}
+                        aria-label={`${slot.time}${slot.available ? '' : ', indisponível'}`}
+                        onClick={() => {
+                          setTime(slot.time)
+                          setSubmitError(null)
+                        }}
+                        className={cn(
+                          'rounded-lg border py-3 text-sm font-medium tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                          !slot.available &&
+                            'cursor-not-allowed border-border/50 text-muted-foreground/40 line-through',
+                          slot.available &&
+                            time === slot.time &&
+                            'border-primary bg-primary text-primary-foreground',
+                          slot.available &&
+                            time !== slot.time &&
+                            'border-border bg-background text-foreground hover:border-primary/60 hover:bg-primary/5',
+                        )}
+                      >
+                        {slot.time}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
           </>
         )}
 
         {step === 3 && (
-          <>
-            <h2 className="font-serif text-2xl text-foreground">Escolha o horário</h2>
-            {isLoadingSlots ? (
-              <div className="flex min-h-32 items-center justify-center gap-2 rounded-xl border border-border bg-card text-sm text-muted-foreground" role="status">
-                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-                Consultando horários disponíveis...
-              </div>
-            ) : availabilityError ? (
-              <div className="flex min-h-32 flex-col items-center justify-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-5 text-center">
-                <p role="alert" className="text-sm text-destructive">{availabilityError}</p>
-                <Button type="button" variant="outline" onClick={() => date && void loadAvailability(date)}>
-                  Tentar novamente
-                </Button>
-              </div>
-            ) : !timeSlots.some((slot) => slot.available) ? (
-              <div className="flex min-h-32 items-center justify-center rounded-xl border border-border bg-card p-5 text-center text-sm text-muted-foreground">
-                Não há horários disponíveis para esta data. Volte e escolha outro dia.
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-                {timeSlots.map((slot) => (
-                  <button
-                    key={slot.time}
-                    type="button"
-                    disabled={!slot.available}
-                    aria-pressed={time === slot.time}
-                    onClick={() => {
-                      setTime(slot.time)
-                      setSubmitError(null)
-                    }}
-                    className={cn(
-                      'rounded-lg border py-3 text-sm font-medium transition-colors',
-                      !slot.available && 'cursor-not-allowed border-border/50 text-muted-foreground/40 line-through',
-                      slot.available &&
-                        time === slot.time &&
-                        'border-primary bg-primary/10 text-foreground',
-                      slot.available &&
-                        time !== slot.time &&
-                        'border-border bg-card text-foreground hover:border-primary/50',
-                    )}
-                  >
-                    {slot.time}
-                  </button>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-
-        {step === 4 && (
           <>
             <h2 className="font-serif text-2xl text-foreground">
               {isRescheduling ? 'Confirme a remarcação' : 'Confirme o agendamento'}

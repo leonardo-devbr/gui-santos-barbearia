@@ -434,6 +434,44 @@ describe('agendamentos com MySQL', () => {
     expect(slots.find((slot) => slot.time === '10:00')?.available).toBe(true)
   })
 
+  it('resume um período do calendário distinguindo dias fechados, lotados e disponíveis', async () => {
+    const customerId = await createCustomer('calendario')
+    const from = addDaysToIsoDate(getTodayInSaoPaulo(), 1)
+    const to = addDaysToIsoDate(from, 7)
+    const dates = Array.from({ length: 8 }, (_, offset) => addDaysToIsoDate(from, offset))
+    const openDates = dates.filter((date) => {
+      const weekday = new Date(`${date}T12:00:00.000Z`).getUTCDay()
+      return weekday >= 2 && weekday <= 6
+    })
+    const closedDate = dates.find((date) => {
+      const weekday = new Date(`${date}T12:00:00.000Z`).getUTCDay()
+      return weekday < 2
+    })
+    expect(openDates.length).toBeGreaterThanOrEqual(2)
+    expect(closedDate).toBeTruthy()
+
+    await applicationPool.execute<ResultSetHeader>(
+      `INSERT INTO schedule_blocks
+        (id, barber_id, block_date, start_time, end_time, reason, created_by)
+       VALUES (?, 'guilherme', ?, NULL, NULL, 'Folga', ?)`,
+      [randomUUID(), openDates[0], staffUserId],
+    )
+
+    const days = await appointmentModule.getAvailabilityForPeriod({
+      customerId,
+      serviceId: 'corte',
+      barberId: 'guilherme',
+      from,
+      to,
+    })
+    const statusByDate = new Map(days.map((day) => [day.date, day.status]))
+
+    expect(days).toHaveLength(8)
+    expect(statusByDate.get(openDates[0])).toBe('full')
+    expect(statusByDate.get(openDates[1])).toBe('available')
+    expect(statusByDate.get(closedDate!)).toBe('closed')
+  })
+
   it('não altera uma remarcação idêntica e protege a propriedade do agendamento', async () => {
     const ownerId = await createCustomer('proprietario')
     const otherCustomerId = await createCustomer('terceiro')

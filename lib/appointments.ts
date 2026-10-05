@@ -2,7 +2,10 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
-import { MAX_BOOKING_DAYS_AHEAD } from '@/lib/booking-calendar'
+import {
+  MAX_BOOKING_DAYS_AHEAD,
+  type BookingDayAvailability,
+} from '@/lib/booking-calendar'
 import { addDaysToIsoDate, getNowInSaoPaulo, isValidIsoDate, isValidTime } from '@/lib/date'
 import { getPool, withTransaction } from '@/lib/db'
 import type { Appointment, AppointmentStatus, TimeSlot } from '@/lib/types'
@@ -39,15 +42,27 @@ interface BusySlotRow extends RowDataPacket {
   duration_minutes: number
 }
 
+interface PeriodBusySlotRow extends BusySlotRow {
+  appointment_date: string
+}
+
 interface ScheduleBlockRow extends RowDataPacket {
   start_time: string | null
   end_time: string | null
+}
+
+interface PeriodScheduleBlockRow extends ScheduleBlockRow {
+  block_date: string
 }
 
 interface BusinessHoursRow extends RowDataPacket {
   is_open: number | boolean
   open_time: string | null
   close_time: string | null
+}
+
+interface PeriodBusinessHoursRow extends BusinessHoursRow {
+  weekday: number
 }
 
 interface OwnedAppointmentRow extends RowDataPacket {
@@ -107,6 +122,47 @@ function parseBusinessHours(row: BusinessHoursRow | undefined) {
     opensAt: timeToMinutes(row.open_time.slice(0, 5)),
     closesAt: timeToMinutes(row.close_time.slice(0, 5)),
   }
+}
+
+function buildAvailabilitySlots({
+  date,
+  now,
+  durationMinutes,
+  hours,
+  busySlots,
+  scheduleBlocks,
+}: {
+  date: string
+  now: ReturnType<typeof getNowInSaoPaulo>
+  durationMinutes: number
+  hours: { opensAt: number; closesAt: number } | null
+  busySlots: readonly BusySlotRow[]
+  scheduleBlocks: readonly ScheduleBlockRow[]
+}) {
+  if (!hours) return []
+
+  const slots: TimeSlot[] = []
+
+  for (let start = hours.opensAt; start + durationMinutes <= hours.closesAt; start += 30) {
+    const time = minutesToTime(start)
+    const isFuture = date > now.date || (date === now.date && time > now.time)
+    const overlaps = busySlots.some((busySlot) => {
+      const busyStart = timeToMinutes(busySlot.appointment_time.slice(0, 5))
+      const busyEnd = busyStart + busySlot.duration_minutes
+      return start < busyEnd && start + durationMinutes > busyStart
+    })
+    const isBlocked = scheduleBlocks.some((block) => {
+      if (!block.start_time || !block.end_time) return true
+
+      const blockStart = timeToMinutes(block.start_time.slice(0, 5))
+      const blockEnd = timeToMinutes(block.end_time.slice(0, 5))
+      return start < blockEnd && start + durationMinutes > blockStart
+    })
+
+    slots.push({ time, available: isFuture && !overlaps && !isBlocked })
+  }
+
+  return slots
 }
 
 function validateBookingTime(
@@ -269,32 +325,147 @@ export async function getAvailability({
       [date, barberId],
     ),
   ])
-  const slots: TimeSlot[] = []
+  return buildAvailabilitySlots({
+    date,
+    now,
+    durationMinutes: service.duration_minutes,
+    hours,
+    busySlots,
+    scheduleBlocks,
+  })
+}
 
-  for (
-    let start = hours.opensAt;
-    start + service.duration_minutes <= hours.closesAt;
-    start += 30
-  ) {
-    const time = minutesToTime(start)
-    const isFuture = date > now.date || (date === now.date && time > now.time)
-    const overlaps = busySlots.some((busySlot) => {
-      const busyStart = timeToMinutes(busySlot.appointment_time.slice(0, 5))
-      const busyEnd = busyStart + busySlot.duration_minutes
-      return start < busyEnd && start + service.duration_minutes > busyStart
-    })
-    const isBlocked = scheduleBlocks.some((block) => {
-      if (!block.start_time || !block.end_time) return true
+export async function getAvailabilityForPeriod({
+  customerId,
+  appointmentId,
+  serviceId,
+  barberId,
+  from,
+  to,
+}: {
+  customerId: string
+  appointmentId?: string
+  serviceId: string
+  barberId: string
+  from: string
+  to: string
+}) {
+  const now = getNowInSaoPaulo()
+  const bookingLimit = addDaysToIsoDate(now.date, MAX_BOOKING_DAYS_AHEAD)
 
-      const blockStart = timeToMinutes(block.start_time.slice(0, 5))
-      const blockEnd = timeToMinutes(block.end_time.slice(0, 5))
-      return start < blockEnd && start + service.duration_minutes > blockStart
-    })
-
-    slots.push({ time, available: isFuture && !overlaps && !isBlocked })
+  if (!isValidIsoDate(from) || !isValidIsoDate(to) || from > to) {
+    throw new AppointmentError('Informe um período de disponibilidade válido.', 422)
+  }
+  if (from < now.date || to > bookingLimit) {
+    throw new AppointmentError(
+      `Consulte datas entre hoje e os próximos ${MAX_BOOKING_DAYS_AHEAD} dias.`,
+      422,
+    )
   }
 
-  return slots
+  const totalDays =
+    Math.round(
+      (new Date(`${to}T12:00:00.000Z`).getTime() -
+        new Date(`${from}T12:00:00.000Z`).getTime()) /
+        86_400_000,
+    ) + 1
+  if (totalDays > 31) {
+    throw new AppointmentError('Consulte no máximo 31 dias por vez.', 422)
+  }
+
+  const pool = getPool()
+  const [[serviceRows], [barberRows], [businessHoursRows]] = await Promise.all([
+    pool.execute<ServiceBookingRow[]>(
+      'SELECT id, duration_minutes, price FROM services WHERE id = ? AND is_active = TRUE LIMIT 1',
+      [serviceId],
+    ),
+    pool.execute<IdRow[]>('SELECT id FROM barbers WHERE id = ? AND is_active = TRUE LIMIT 1', [
+      barberId,
+    ]),
+    pool.execute<PeriodBusinessHoursRow[]>(
+      'SELECT weekday, is_open, open_time, close_time FROM business_hours',
+    ),
+  ])
+  const service = serviceRows[0]
+
+  if (!service || !barberRows[0]) {
+    throw new AppointmentError('O serviço ou barbeiro selecionado não está disponível.', 422)
+  }
+
+  let excludedAppointmentId: string | undefined
+  if (appointmentId && appointmentId.length <= 64) {
+    const [ownedRows] = await pool.execute<IdRow[]>(
+      'SELECT id FROM appointments WHERE id = ? AND customer_id = ? LIMIT 1',
+      [appointmentId, customerId],
+    )
+    excludedAppointmentId = ownedRows[0]?.id
+  }
+
+  const busyParameters: string[] = [barberId, from, to]
+  let exclusionClause = ''
+  if (excludedAppointmentId) {
+    exclusionClause = 'AND id <> ?'
+    busyParameters.push(excludedAppointmentId)
+  }
+
+  const [[busySlots], [scheduleBlocks]] = await Promise.all([
+    pool.execute<PeriodBusySlotRow[]>(
+      `SELECT appointment_date, appointment_time, duration_minutes
+       FROM appointments
+       WHERE barber_id = ?
+         AND appointment_date BETWEEN ? AND ?
+         AND status = 'confirmado'
+         ${exclusionClause}`,
+      busyParameters,
+    ),
+    pool.execute<PeriodScheduleBlockRow[]>(
+      `SELECT block_date, start_time, end_time
+       FROM schedule_blocks
+       WHERE block_date BETWEEN ? AND ?
+         AND (barber_id = ? OR barber_id IS NULL)`,
+      [from, to, barberId],
+    ),
+  ])
+
+  const businessHoursByWeekday = new Map(
+    businessHoursRows.map((row) => [row.weekday, row] as const),
+  )
+  const busySlotsByDate = new Map<string, PeriodBusySlotRow[]>()
+  const scheduleBlocksByDate = new Map<string, PeriodScheduleBlockRow[]>()
+
+  for (const slot of busySlots) {
+    const current = busySlotsByDate.get(slot.appointment_date) ?? []
+    current.push(slot)
+    busySlotsByDate.set(slot.appointment_date, current)
+  }
+  for (const block of scheduleBlocks) {
+    const current = scheduleBlocksByDate.get(block.block_date) ?? []
+    current.push(block)
+    scheduleBlocksByDate.set(block.block_date, current)
+  }
+
+  const days: BookingDayAvailability[] = []
+  for (let date = from; date <= to; date = addDaysToIsoDate(date, 1)) {
+    const weekday = new Date(`${date}T12:00:00.000Z`).getUTCDay()
+    const hours = parseBusinessHours(businessHoursByWeekday.get(weekday))
+
+    if (!hours) {
+      days.push({ date, status: 'closed' })
+      continue
+    }
+
+    const slots = buildAvailabilitySlots({
+      date,
+      now,
+      durationMinutes: service.duration_minutes,
+      hours,
+      busySlots: busySlotsByDate.get(date) ?? [],
+      scheduleBlocks: scheduleBlocksByDate.get(date) ?? [],
+    })
+    days.push({ date, status: slots.some((slot) => slot.available) ? 'available' : 'full' })
+  }
+
+  return days
 }
 
 async function getBookingResources(connection: PoolConnection, input: AppointmentInput) {
