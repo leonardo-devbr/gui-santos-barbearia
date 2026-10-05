@@ -1,8 +1,12 @@
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import { getAuthenticatedCustomer } from '@/lib/auth'
 import { getLoginHref } from '@/lib/navigation'
 
-export function SiteHeader() {
+export async function SiteHeader() {
+  const customer = await getAuthenticatedCustomer()
+  const isAuthenticated = Boolean(customer)
+
   return (
     <header className="absolute inset-x-0 top-0 z-50">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
@@ -13,13 +17,18 @@ export function SiteHeader() {
         <div className="flex items-center gap-2">
           <Button
             variant="ghost"
-            render={<Link href="/login" />}
+            render={<Link href={isAuthenticated ? '/app' : '/login'} />}
             nativeButton={false}
             className="inline-flex"
           >
-            Entrar
+            {isAuthenticated ? 'Meu painel' : 'Entrar'}
           </Button>
-          <Button render={<Link href={getLoginHref('/app/agendar')} />} nativeButton={false}>
+          <Button
+            render={
+              <Link href={isAuthenticated ? '/app/agendar' : getLoginHref('/app/agendar')} />
+            }
+            nativeButton={false}
+          >
             Agendar horário
           </Button>
         </div>
