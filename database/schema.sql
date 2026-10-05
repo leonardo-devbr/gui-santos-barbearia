@@ -295,17 +295,17 @@ VALUES
   (
     1,
     'Gui Santos Barbearia',
-    'Rua das Palmeiras, 245',
-    'Jardim América',
-    'São Paulo',
+    'Rua Antônio Marinoni, 183',
+    'Jardim Mirante dos Óvnis',
+    'Votorantim',
     'SP',
-    '01432000',
-    '1140028899',
+    '18110420',
+    '15991307316',
     'contato@guisantosbarbearia.com.br',
-    -23.5638000,
-    -46.6558000,
-    'Estacionamento conveniado a 50m, na Rua Aurora.',
-    'Estação Jardim América a 5 minutos a pé.',
+    -23.5527037,
+    -47.4527880,
+    '',
+    '',
     '12345678000190'
   );
 

@@ -379,6 +379,42 @@ async function addBarberContactProfile() {
   ])
 }
 
+async function updateDefaultBusinessLocation() {
+  const migrationName = '20261005_update_default_business_location'
+  if (await hasSchemaMigration(migrationName)) return
+
+  await databaseConnection.execute(
+    'UPDATE business_settings SET phone = ? WHERE id = 1 AND phone = ?',
+    ['15991307316', '1140028899'],
+  )
+  await databaseConnection.execute(
+    `UPDATE business_settings
+     SET street = ?, district = ?, city = ?, state = ?, postal_code = ?,
+       latitude = ?, longitude = ?, parking_info = '', transit_info = ''
+     WHERE id = 1
+       AND street IN (?, ?)
+       AND city = ?
+       AND postal_code = ?`,
+    [
+      'Rua Antônio Marinoni, 183',
+      'Jardim Mirante dos Óvnis',
+      'Votorantim',
+      'SP',
+      '18110420',
+      -23.5527037,
+      -47.452788,
+      'Rua das Palmeiras, 245',
+      'Antonio Marinoni, 183',
+      'São Paulo',
+      '01432000',
+    ],
+  )
+
+  await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+    migrationName,
+  ])
+}
+
 try {
   await databaseConnection.query(schema)
   await migrateCustomerEmailVerification()
@@ -390,6 +426,7 @@ try {
   await addAppointmentPeriodIndex()
   await addBarberProfilePhotos()
   await addBarberContactProfile()
+  await updateDefaultBusinessLocation()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {
   await databaseConnection.end()
