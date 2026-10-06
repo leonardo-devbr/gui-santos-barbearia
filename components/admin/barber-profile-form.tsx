@@ -36,6 +36,7 @@ export function BarberProfileForm({ profile }: { profile: BarberProfile }) {
     currentPassword: '',
     newPassword: '',
     passwordConfirmation: '',
+    whatsappOptIn: profile.whatsappOptIn,
   })
   const [errors, setErrors] = useState<BarberProfileErrors>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -47,6 +48,17 @@ export function BarberProfileForm({ profile }: { profile: BarberProfile }) {
       if (!current[field]) return current
       const next = { ...current }
       delete next[field]
+      return next
+    })
+    setSubmitError(null)
+  }
+
+  function updateWhatsappOptIn(value: boolean) {
+    setForm((current) => ({ ...current, whatsappOptIn: value }))
+    setErrors((current) => {
+      if (!current.whatsappOptIn) return current
+      const next = { ...current }
+      delete next.whatsappOptIn
       return next
     })
     setSubmitError(null)
@@ -88,6 +100,7 @@ export function BarberProfileForm({ profile }: { profile: BarberProfile }) {
         currentPassword: '',
         newPassword: '',
         passwordConfirmation: '',
+        whatsappOptIn: result.profile!.whatsappOptIn,
       }))
       toast.success(result.passwordChanged ? 'Perfil e senha atualizados' : 'Perfil atualizado', {
         description: result.message,
@@ -161,6 +174,35 @@ export function BarberProfileForm({ profile }: { profile: BarberProfile }) {
                 </p>
               )}
               <FieldError id="barber-profile-phone-error">{errors.phone}</FieldError>
+            </Field>
+
+            <Field data-invalid={Boolean(errors.whatsappOptIn)}>
+              <label
+                htmlFor="barber-whatsapp-opt-in"
+                className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-muted/30 p-4 text-sm leading-relaxed"
+              >
+                <input
+                  id="barber-whatsapp-opt-in"
+                  name="whatsappOptIn"
+                  type="checkbox"
+                  checked={form.whatsappOptIn}
+                  className="mt-0.5 size-4 shrink-0 accent-primary"
+                  aria-invalid={Boolean(errors.whatsappOptIn)}
+                  aria-describedby={
+                    errors.whatsappOptIn
+                      ? 'barber-whatsapp-error barber-whatsapp-help'
+                      : 'barber-whatsapp-help'
+                  }
+                  onChange={(event) => updateWhatsappOptIn(event.target.checked)}
+                />
+                <span>
+                  Aceito receber da Gui Santos Barbearia avisos de agendamentos pelo WhatsApp.
+                </span>
+              </label>
+              <p id="barber-whatsapp-help" className="text-xs text-muted-foreground">
+                Ao ativar, o telefone público acima também será usado para os avisos da sua agenda.
+              </p>
+              <FieldError id="barber-whatsapp-error">{errors.whatsappOptIn}</FieldError>
             </Field>
 
             <Field data-invalid={Boolean(errors.specialty)}>

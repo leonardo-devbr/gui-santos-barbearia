@@ -27,6 +27,7 @@ interface BarberProfileRow extends RowDataPacket {
   photo_position_x: number
   photo_position_y: number
   photo_revision: number
+  whatsapp_opt_in: number | boolean
 }
 
 interface LockedBarberProfileRow extends BarberProfileRow {
@@ -63,6 +64,7 @@ function mapProfile(row: BarberProfileRow): BarberProfile {
     ),
     photoPositionX: row.photo_position_x,
     photoPositionY: row.photo_position_y,
+    whatsappOptIn: Boolean(row.whatsapp_opt_in),
   }
 }
 
@@ -88,7 +90,8 @@ export async function getBarberProfile(staff: StaffUser) {
        barbers.photo_data IS NOT NULL AS has_uploaded_photo,
        barbers.photo_position_x,
        barbers.photo_position_y,
-       barbers.photo_revision
+       barbers.photo_revision,
+       staff_users.whatsapp_opt_in
      FROM staff_users
      INNER JOIN barbers ON barbers.id = staff_users.barber_id
      WHERE staff_users.id = ?
@@ -111,6 +114,13 @@ export async function updateCurrentBarberProfile(body: Record<string, unknown>) 
   const staff = requireBarberIdentity(await getAuthenticatedStaff())
   const sessionTokenHash = await getCurrentStaffSessionTokenHash()
   if (!sessionTokenHash) throw new BarberProfileError('Sua sessão expirou. Entre novamente.', 401)
+  if (typeof body.whatsappOptIn !== 'boolean') {
+    throw new BarberProfileError(
+      'Informe uma preferência válida para os avisos no WhatsApp.',
+      422,
+      'whatsappOptIn',
+    )
+  }
 
   const { data, errors, isChangingPassword } = validateBarberProfileForm({
     name: typeof body.name === 'string' ? body.name : '',
@@ -121,6 +131,7 @@ export async function updateCurrentBarberProfile(body: Record<string, unknown>) 
     newPassword: typeof body.newPassword === 'string' ? body.newPassword : '',
     passwordConfirmation:
       typeof body.passwordConfirmation === 'string' ? body.passwordConfirmation : '',
+    whatsappOptIn: body.whatsappOptIn,
   })
   const firstError = Object.entries(errors)[0] as [BarberProfileField, string] | undefined
   if (firstError) {
@@ -141,7 +152,8 @@ export async function updateCurrentBarberProfile(body: Record<string, unknown>) 
          barbers.photo_data IS NOT NULL AS has_uploaded_photo,
          barbers.photo_position_x,
          barbers.photo_position_y,
-         barbers.photo_revision
+         barbers.photo_revision,
+         staff_users.whatsapp_opt_in
        FROM staff_sessions
        INNER JOIN staff_users ON staff_users.id = staff_sessions.staff_user_id
        INNER JOIN barbers ON barbers.id = staff_users.barber_id
@@ -184,18 +196,65 @@ export async function updateCurrentBarberProfile(body: Record<string, unknown>) 
 
     if (passwordHash) {
       await connection.execute<ResultSetHeader>(
-        'UPDATE staff_users SET name = ?, password_hash = ? WHERE id = ?',
-        [data.name, passwordHash, staff.id],
+        `UPDATE staff_users
+         SET name = ?, password_hash = ?,
+             whatsapp_opted_in_at = CASE
+               WHEN ? = TRUE AND (
+                 whatsapp_opt_in = FALSE OR notification_phone <> ?
+               ) THEN UTC_TIMESTAMP()
+               ELSE whatsapp_opted_in_at
+             END,
+             whatsapp_opted_out_at = CASE
+               WHEN ? = FALSE AND whatsapp_opt_in = TRUE THEN UTC_TIMESTAMP()
+               ELSE whatsapp_opted_out_at
+             END,
+             notification_phone = CASE WHEN ? = TRUE THEN ? ELSE notification_phone END,
+             whatsapp_opt_in = ?
+         WHERE id = ?`,
+        [
+          data.name,
+          passwordHash,
+          data.whatsappOptIn,
+          data.phone,
+          data.whatsappOptIn,
+          data.whatsappOptIn,
+          data.phone,
+          data.whatsappOptIn,
+          staff.id,
+        ],
       )
       await connection.execute<ResultSetHeader>(
         'DELETE FROM staff_sessions WHERE staff_user_id = ? AND token_hash <> ?',
         [staff.id, sessionTokenHash],
       )
     } else {
-      await connection.execute<ResultSetHeader>('UPDATE staff_users SET name = ? WHERE id = ?', [
-        data.name,
-        staff.id,
-      ])
+      await connection.execute<ResultSetHeader>(
+        `UPDATE staff_users
+         SET name = ?,
+             whatsapp_opted_in_at = CASE
+               WHEN ? = TRUE AND (
+                 whatsapp_opt_in = FALSE OR notification_phone <> ?
+               ) THEN UTC_TIMESTAMP()
+               ELSE whatsapp_opted_in_at
+             END,
+             whatsapp_opted_out_at = CASE
+               WHEN ? = FALSE AND whatsapp_opt_in = TRUE THEN UTC_TIMESTAMP()
+               ELSE whatsapp_opted_out_at
+             END,
+             notification_phone = CASE WHEN ? = TRUE THEN ? ELSE notification_phone END,
+             whatsapp_opt_in = ?
+         WHERE id = ?`,
+        [
+          data.name,
+          data.whatsappOptIn,
+          data.phone,
+          data.whatsappOptIn,
+          data.whatsappOptIn,
+          data.phone,
+          data.whatsappOptIn,
+          staff.id,
+        ],
+      )
     }
 
     return {
@@ -205,6 +264,7 @@ export async function updateCurrentBarberProfile(body: Record<string, unknown>) 
         phone: data.phone,
         specialty: data.specialty,
         bio: data.bio,
+        whatsapp_opt_in: data.whatsappOptIn,
       }),
       passwordChanged: Boolean(passwordHash),
     }

@@ -41,6 +41,7 @@ export interface BarberProfile {
   photoUrl: string
   photoPositionX: number
   photoPositionY: number
+  whatsappOptIn: boolean
 }
 
 export type AppointmentStatus = 'confirmado' | 'concluido' | 'cancelado'
@@ -115,6 +116,8 @@ export interface StaffAccount {
   role: StaffRole
   barberId: string | null
   barberName: string | null
+  notificationPhone: string
+  whatsappOptIn: boolean
   isActive: boolean
   isCurrent: boolean
 }
@@ -148,4 +151,5 @@ export interface CustomerProfile {
   preferredCut: string
   beardStyle: string
   notes: string
+  whatsappOptIn: boolean
 }

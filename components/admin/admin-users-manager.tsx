@@ -16,6 +16,7 @@ import {
   validateAdminUserForm,
 } from '@/lib/admin-form-validation'
 import type { AdminBarber, StaffAccount, StaffRole } from '@/lib/types'
+import { formatPhone } from '@/lib/validation'
 
 interface ApiResponse {
   user?: StaffAccount
@@ -44,6 +45,7 @@ export function AdminUsersManager({
   const [users, setUsers] = useState(initial)
   const [editing, setEditing] = useState<StaffAccount | null>(null)
   const [role, setRole] = useState<StaffRole>('barber')
+  const [notificationPhone, setNotificationPhone] = useState('')
   const [errors, setErrors] = useState<AdminUserFormErrors>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [formKey, setFormKey] = useState(0)
@@ -63,6 +65,7 @@ export function AdminUsersManager({
   function startCreating() {
     setEditing(null)
     setRole('barber')
+    setNotificationPhone('')
     setErrors({})
     setSubmitError(null)
     setFormKey((current) => current + 1)
@@ -71,6 +74,7 @@ export function AdminUsersManager({
   function startEditing(user: StaffAccount) {
     setEditing(user)
     setRole(user.role)
+    setNotificationPhone(formatPhone(user.notificationPhone))
     setErrors({})
     setSubmitError(null)
     setFormKey((current) => current + 1)
@@ -89,6 +93,8 @@ export function AdminUsersManager({
         password: String(data.get('password') ?? ''),
         passwordConfirmation: String(data.get('passwordConfirmation') ?? ''),
         currentPassword: String(data.get('currentPassword') ?? ''),
+        notificationPhone: String(data.get('notificationPhone') ?? ''),
+        whatsappOptIn: data.get('whatsappOptIn') === 'on',
       },
       Boolean(editing),
     )
@@ -141,6 +147,7 @@ export function AdminUsersManager({
       toast.success(editing ? 'Acesso atualizado.' : 'Acesso criado.')
       setEditing(null)
       setRole('barber')
+      setNotificationPhone('')
       setErrors({})
       setSubmitError(null)
       setFormKey((current) => current + 1)
@@ -276,6 +283,74 @@ export function AdminUsersManager({
                   required
                 />
                 <FieldError id="staff-email-error">{errors.email}</FieldError>
+              </Field>
+
+              <Field data-invalid={Boolean(errors.notificationPhone)}>
+                <FieldLabel htmlFor="staff-notification-phone">Telefone para avisos</FieldLabel>
+                <Input
+                  id="staff-notification-phone"
+                  name="notificationPhone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  value={notificationPhone}
+                  maxLength={15}
+                  placeholder="(15) 99999-9999"
+                  aria-invalid={Boolean(errors.notificationPhone)}
+                  aria-describedby={
+                    errors.notificationPhone
+                      ? 'staff-notification-phone-error'
+                      : 'staff-notification-phone-help'
+                  }
+                  onValueChange={(value) => {
+                    setNotificationPhone(formatPhone(value))
+                    clearError('notificationPhone')
+                  }}
+                />
+                {!errors.notificationPhone && (
+                  <p
+                    id="staff-notification-phone-help"
+                    className="text-xs font-normal text-muted-foreground"
+                  >
+                    Usado somente nos avisos internos de agendamento.
+                  </p>
+                )}
+                <FieldError id="staff-notification-phone-error">
+                  {errors.notificationPhone}
+                </FieldError>
+              </Field>
+
+              <Field data-invalid={Boolean(errors.whatsappOptIn)}>
+                <label
+                  htmlFor="staff-whatsapp-opt-in"
+                  className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-muted/30 p-4 text-sm leading-relaxed"
+                >
+                  <input
+                    id="staff-whatsapp-opt-in"
+                    name="whatsappOptIn"
+                    type="checkbox"
+                    defaultChecked={editing?.whatsappOptIn ?? false}
+                    className="mt-0.5 size-4 shrink-0 accent-primary"
+                    aria-invalid={Boolean(errors.whatsappOptIn)}
+                    aria-describedby={
+                      errors.whatsappOptIn
+                        ? 'staff-whatsapp-opt-in-error staff-whatsapp-opt-in-help'
+                        : 'staff-whatsapp-opt-in-help'
+                    }
+                    onChange={() => clearError('whatsappOptIn')}
+                  />
+                  <span>
+                    Confirmo que esta pessoa autorizou a Gui Santos Barbearia a enviar avisos de
+                    agendamentos pelo WhatsApp.
+                  </span>
+                </label>
+                <p
+                  id="staff-whatsapp-opt-in-help"
+                  className="text-xs font-normal text-muted-foreground"
+                >
+                  O consentimento é opcional e pode ser retirado a qualquer momento.
+                </p>
+                <FieldError id="staff-whatsapp-opt-in-error">{errors.whatsappOptIn}</FieldError>
               </Field>
 
               <Field data-invalid={Boolean(errors.password)}>
@@ -421,6 +496,12 @@ export function AdminUsersManager({
                     {user.barberName && (
                       <p className="text-xs text-muted-foreground">Agenda: {user.barberName}</p>
                     )}
+                    <p className="text-xs text-muted-foreground">
+                      WhatsApp:{' '}
+                      {user.whatsappOptIn
+                        ? `${formatPhone(user.notificationPhone)} — autorizado`
+                        : 'não autorizado'}
+                    </p>
                   </div>
                 </div>
                 <Button type="button" variant="outline" onClick={() => startEditing(user)}>

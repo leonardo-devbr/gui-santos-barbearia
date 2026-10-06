@@ -1,5 +1,12 @@
 import type { Service, StaffRole } from '@/lib/types'
-import { getPasswordError, isValidEmail, MAX_PASSWORD_LENGTH, normalizeEmail } from '@/lib/validation'
+import {
+  getPasswordError,
+  isValidBrazilianPhone,
+  isValidEmail,
+  MAX_PASSWORD_LENGTH,
+  normalizeEmail,
+  normalizePhone,
+} from '@/lib/validation'
 
 const serviceCategories: Service['category'][] = ['cortes', 'barba', 'combos', 'acabamentos']
 
@@ -27,6 +34,8 @@ export type AdminUserFormField =
   | 'password'
   | 'passwordConfirmation'
   | 'currentPassword'
+  | 'notificationPhone'
+  | 'whatsappOptIn'
 
 export type AdminUserFormErrors = Partial<Record<AdminUserFormField, string>>
 
@@ -105,12 +114,15 @@ export function validateAdminUserForm(
     password: string
     passwordConfirmation: string
     currentPassword: string
+    notificationPhone: string
+    whatsappOptIn: boolean
   },
   editing: boolean,
 ) {
   const errors: AdminUserFormErrors = {}
   const name = input.name.trim().replace(/\s+/g, ' ')
   const email = normalizeEmail(input.email)
+  const notificationPhone = normalizePhone(input.notificationPhone)
 
   if (input.role !== 'admin' && input.role !== 'barber') {
     errors.role = 'Selecione um tipo de acesso válido.'
@@ -123,6 +135,12 @@ export function validateAdminUserForm(
   }
   if (!isValidEmail(email) || email.length > 254) {
     errors.email = 'Informe um e-mail válido.'
+  }
+  if (notificationPhone && !isValidBrazilianPhone(input.notificationPhone)) {
+    errors.notificationPhone = 'Informe um telefone brasileiro válido ou deixe o campo em branco.'
+  }
+  if (input.whatsappOptIn && !isValidBrazilianPhone(input.notificationPhone)) {
+    errors.notificationPhone = 'Informe um telefone brasileiro válido para ativar os avisos.'
   }
 
   if (!input.password && !editing) {
@@ -149,6 +167,8 @@ export function validateAdminUserForm(
       role: input.role,
       barberId: input.role === 'barber' ? input.barberId : null,
       currentPassword: input.currentPassword,
+      notificationPhone,
+      whatsappOptIn: input.whatsappOptIn,
     },
     errors,
   }

@@ -1092,6 +1092,8 @@ describe('acesso da equipe com MySQL', () => {
       password: barberPassword,
       role: 'barber',
       barberId: 'guilherme',
+      notificationPhone: '',
+      whatsappOptIn: false,
       currentPassword: adminPassword,
     })
     expect(account).toMatchObject({

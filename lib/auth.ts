@@ -25,6 +25,7 @@ interface CustomerRow extends RowDataPacket {
   preferred_cut: string
   beard_style: string
   notes: string
+  whatsapp_opt_in: number | boolean
 }
 
 interface LoginCredentialRow extends RowDataPacket {
@@ -43,6 +44,7 @@ function mapCustomer(row: CustomerRow): CustomerProfile {
     preferredCut: row.preferred_cut,
     beardStyle: row.beard_style,
     notes: row.notes,
+    whatsappOptIn: Boolean(row.whatsapp_opt_in),
   }
 }
 
@@ -186,7 +188,8 @@ export async function getAuthenticatedCustomer() {
       customers.birth_date,
       customers.preferred_cut,
       customers.beard_style,
-      customers.notes
+      customers.notes,
+      customers.whatsapp_opt_in
     FROM sessions
     INNER JOIN customers ON customers.id = sessions.customer_id
     WHERE sessions.token_hash = ? AND sessions.expires_at > UTC_TIMESTAMP()

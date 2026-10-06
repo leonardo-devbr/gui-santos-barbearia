@@ -160,6 +160,17 @@ async function hasStaffUserIndex(name) {
   return Boolean(rows[0])
 }
 
+async function hasStaffUserColumn(name) {
+  const [rows] = await databaseConnection.execute(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = 'staff_users' AND column_name = ?
+     LIMIT 1`,
+    [name],
+  )
+  return Boolean(rows[0])
+}
+
 async function hasBarberColumn(name) {
   const [rows] = await databaseConnection.execute(
     `SELECT 1
@@ -379,6 +390,52 @@ async function addBarberContactProfile() {
   ])
 }
 
+async function addWhatsappContactPreferences() {
+  const migrationName = '20261006_whatsapp_contact_preferences'
+  if (await hasSchemaMigration(migrationName)) return
+
+  if (!(await hasCustomerColumn('whatsapp_opt_in'))) {
+    await databaseConnection.query(
+      'ALTER TABLE customers ADD COLUMN whatsapp_opt_in BOOLEAN NOT NULL DEFAULT FALSE AFTER notes',
+    )
+  }
+  if (!(await hasCustomerColumn('whatsapp_opted_in_at'))) {
+    await databaseConnection.query(
+      'ALTER TABLE customers ADD COLUMN whatsapp_opted_in_at DATETIME NULL AFTER whatsapp_opt_in',
+    )
+  }
+  if (!(await hasCustomerColumn('whatsapp_opted_out_at'))) {
+    await databaseConnection.query(
+      'ALTER TABLE customers ADD COLUMN whatsapp_opted_out_at DATETIME NULL AFTER whatsapp_opted_in_at',
+    )
+  }
+
+  if (!(await hasStaffUserColumn('notification_phone'))) {
+    await databaseConnection.query(
+      "ALTER TABLE staff_users ADD COLUMN notification_phone VARCHAR(11) NOT NULL DEFAULT '' AFTER barber_id",
+    )
+  }
+  if (!(await hasStaffUserColumn('whatsapp_opt_in'))) {
+    await databaseConnection.query(
+      'ALTER TABLE staff_users ADD COLUMN whatsapp_opt_in BOOLEAN NOT NULL DEFAULT FALSE AFTER notification_phone',
+    )
+  }
+  if (!(await hasStaffUserColumn('whatsapp_opted_in_at'))) {
+    await databaseConnection.query(
+      'ALTER TABLE staff_users ADD COLUMN whatsapp_opted_in_at DATETIME NULL AFTER whatsapp_opt_in',
+    )
+  }
+  if (!(await hasStaffUserColumn('whatsapp_opted_out_at'))) {
+    await databaseConnection.query(
+      'ALTER TABLE staff_users ADD COLUMN whatsapp_opted_out_at DATETIME NULL AFTER whatsapp_opted_in_at',
+    )
+  }
+
+  await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+    migrationName,
+  ])
+}
+
 async function updateDefaultBusinessLocation() {
   const migrationName = '20261005_update_default_business_location'
   if (await hasSchemaMigration(migrationName)) return
@@ -426,6 +483,7 @@ try {
   await addAppointmentPeriodIndex()
   await addBarberProfilePhotos()
   await addBarberContactProfile()
+  await addWhatsappContactPreferences()
   await updateDefaultBusinessLocation()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {

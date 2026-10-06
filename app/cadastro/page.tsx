@@ -13,6 +13,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/c
 import {
   formatPhone,
   getPasswordError,
+  isValidBrazilianPhone,
   isValidEmail,
   MAX_PASSWORD_LENGTH,
   MIN_PASSWORD_LENGTH,
@@ -20,7 +21,13 @@ import {
   normalizePhone,
 } from '@/lib/validation'
 
-type SignupField = 'name' | 'phone' | 'email' | 'password' | 'passwordConfirmation'
+type SignupField =
+  | 'name'
+  | 'phone'
+  | 'email'
+  | 'password'
+  | 'passwordConfirmation'
+  | 'whatsappOptIn'
 
 type SignupErrors = Partial<Record<SignupField, string>>
 
@@ -36,6 +43,7 @@ function validateSignup(formData: FormData) {
   const email = normalizeEmail(String(formData.get('email') ?? ''))
   const password = String(formData.get('password') ?? '')
   const passwordConfirmation = String(formData.get('passwordConfirmation') ?? '')
+  const whatsappOptIn = formData.get('whatsappOptIn') === 'on'
   const errors: SignupErrors = {}
 
   if (name.length < 3) {
@@ -46,6 +54,8 @@ function validateSignup(formData: FormData) {
 
   if (phone.length < 10 || phone.length > 11) {
     errors.phone = 'Informe um telefone com DDD.'
+  } else if (whatsappOptIn && !isValidBrazilianPhone(phone)) {
+    errors.phone = 'Informe um telefone brasileiro válido para receber avisos no WhatsApp.'
   }
 
   if (!isValidEmail(email)) {
@@ -62,7 +72,7 @@ function validateSignup(formData: FormData) {
   }
 
   return {
-    data: { name, phone, email, password },
+    data: { name, phone, email, password, whatsappOptIn },
     errors,
   }
 }
@@ -256,6 +266,34 @@ export default function SignupPage() {
               required
             />
             <FieldError id="password-confirmation-error">{errors.passwordConfirmation}</FieldError>
+          </Field>
+          <Field data-invalid={Boolean(errors.whatsappOptIn)}>
+            <label
+              htmlFor="whatsappOptIn"
+              className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-muted/30 p-4 text-sm leading-relaxed"
+            >
+              <input
+                id="whatsappOptIn"
+                name="whatsappOptIn"
+                type="checkbox"
+                className="mt-0.5 size-4 shrink-0 accent-primary"
+                aria-invalid={Boolean(errors.whatsappOptIn)}
+                aria-describedby={
+                  errors.whatsappOptIn
+                    ? 'whatsapp-consent-error whatsapp-consent-description'
+                    : 'whatsapp-consent-description'
+                }
+                onChange={() => clearError('whatsappOptIn')}
+              />
+              <span>
+                Aceito receber da Gui Santos Barbearia confirmações e lembretes dos meus
+                agendamentos pelo WhatsApp.
+              </span>
+            </label>
+            <FieldDescription id="whatsapp-consent-description">
+              Opcional. Você poderá alterar esta preferência a qualquer momento no seu perfil.
+            </FieldDescription>
+            <FieldError id="whatsapp-consent-error">{errors.whatsappOptIn}</FieldError>
           </Field>
         </FieldGroup>
 

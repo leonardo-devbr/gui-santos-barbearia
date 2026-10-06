@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   formatPhone,
   getPasswordError,
+  isValidBrazilianPhone,
   isValidEmail,
   normalizeEmail,
   normalizePhone,
@@ -31,6 +32,15 @@ describe('validação de cadastro', () => {
     ['11987654321', '(11) 98765-4321'],
   ])('formata o telefone %s', (value, expected) => {
     expect(formatPhone(value)).toBe(expected)
+  })
+
+  it('valida telefones brasileiros para consentimento de avisos', () => {
+    expect(isValidBrazilianPhone('(15) 99999-1234')).toBe(true)
+    expect(isValidBrazilianPhone('(11) 3333-4444')).toBe(true)
+    expect(isValidBrazilianPhone('(00) 99999-1234')).toBe(false)
+    expect(isValidBrazilianPhone('(15) 19999-1234')).toBe(false)
+    expect(isValidBrazilianPhone('159999123')).toBe(false)
+    expect(isValidBrazilianPhone('+55 15 99999-1234')).toBe(false)
   })
 
   it('aplica os requisitos e limites de senha', () => {

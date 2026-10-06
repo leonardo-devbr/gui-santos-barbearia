@@ -1,5 +1,6 @@
 import {
   getPasswordError,
+  isValidBrazilianPhone,
   MAX_PASSWORD_LENGTH,
   normalizePhone,
 } from '@/lib/validation'
@@ -12,6 +13,7 @@ export type BarberProfileField =
   | 'currentPassword'
   | 'newPassword'
   | 'passwordConfirmation'
+  | 'whatsappOptIn'
 
 export type BarberProfileErrors = Partial<Record<BarberProfileField, string>>
 
@@ -23,6 +25,7 @@ export interface BarberProfileFormValues {
   currentPassword: string
   newPassword: string
   passwordConfirmation: string
+  whatsappOptIn: boolean
 }
 
 export function validateBarberProfileForm(values: BarberProfileFormValues) {
@@ -34,6 +37,7 @@ export function validateBarberProfileForm(values: BarberProfileFormValues) {
   const currentPassword = values.currentPassword
   const newPassword = values.newPassword
   const passwordConfirmation = values.passwordConfirmation
+  const whatsappOptIn = values.whatsappOptIn
   const errors: BarberProfileErrors = {}
 
   if (name.length < 3 || name.length > 80) {
@@ -41,6 +45,9 @@ export function validateBarberProfileForm(values: BarberProfileFormValues) {
   }
   if (phoneDigits.length > 0 && (phoneDigits.length < 10 || phoneDigits.length > 11)) {
     errors.phone = 'Informe um telefone com DDD ou deixe o campo em branco.'
+  }
+  if (whatsappOptIn && !isValidBrazilianPhone(phone)) {
+    errors.phone = 'Informe um telefone brasileiro válido para ativar os avisos.'
   }
   if (specialty.length < 3 || specialty.length > 160) {
     errors.specialty = 'A especialidade deve ter entre 3 e 160 caracteres.'
@@ -75,6 +82,7 @@ export function validateBarberProfileForm(values: BarberProfileFormValues) {
       currentPassword,
       newPassword,
       passwordConfirmation,
+      whatsappOptIn,
     },
     errors,
     isChangingPassword,

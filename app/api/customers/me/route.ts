@@ -22,7 +22,13 @@ import {
   getClientIdentifier,
   rateLimitResponse,
 } from '@/lib/rate-limit'
-import { isValidEmail, MAX_PASSWORD_LENGTH, normalizeEmail, normalizePhone } from '@/lib/validation'
+import {
+  isValidBrazilianPhone,
+  isValidEmail,
+  MAX_PASSWORD_LENGTH,
+  normalizeEmail,
+  normalizePhone,
+} from '@/lib/validation'
 
 type ProfileField =
   | 'name'
@@ -33,6 +39,7 @@ type ProfileField =
   | 'beardStyle'
   | 'notes'
   | 'currentPassword'
+  | 'whatsappOptIn'
 
 interface IdRow extends RowDataPacket {
   id: string
@@ -53,6 +60,7 @@ function validateProfile(body: Record<string, unknown>) {
   const beardStyle = typeof body.beardStyle === 'string' ? body.beardStyle.trim() : ''
   const notes = typeof body.notes === 'string' ? body.notes.trim() : ''
   const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : ''
+  const whatsappOptIn = body.whatsappOptIn === true
   const errors: Partial<Record<ProfileField, string>> = {}
 
   if (name.length < 3) errors.name = 'Informe seu nome completo.'
@@ -60,6 +68,8 @@ function validateProfile(body: Record<string, unknown>) {
 
   if (phoneDigits.length < 10 || phoneDigits.length > 11) {
     errors.phone = 'Informe um telefone com DDD.'
+  } else if (whatsappOptIn && !isValidBrazilianPhone(phone)) {
+    errors.phone = 'Informe um telefone brasileiro válido para receber avisos no WhatsApp.'
   }
   if (!isValidEmail(email) || email.length > 254) errors.email = 'Informe um e-mail válido.'
 
@@ -73,9 +83,22 @@ function validateProfile(body: Record<string, unknown>) {
   if (currentPassword.length > MAX_PASSWORD_LENGTH) {
     errors.currentPassword = 'A senha atual informada é inválida.'
   }
+  if (typeof body.whatsappOptIn !== 'boolean') {
+    errors.whatsappOptIn = 'Informe uma preferência válida para os avisos no WhatsApp.'
+  }
 
   return {
-    data: { name, phone, email, birthDate, preferredCut, beardStyle, notes, currentPassword },
+    data: {
+      name,
+      phone,
+      email,
+      birthDate,
+      preferredCut,
+      beardStyle,
+      notes,
+      currentPassword,
+      whatsappOptIn,
+    },
     errors,
   }
 }
@@ -174,6 +197,10 @@ export async function PATCH(request: Request) {
       }
 
       const profileValues = [
+        data.whatsappOptIn,
+        data.phone,
+        data.whatsappOptIn,
+        data.whatsappOptIn,
         data.name,
         data.phone,
         data.birthDate || null,
@@ -184,7 +211,16 @@ export async function PATCH(request: Request) {
       if (emailChanged) {
         await connection.execute<ResultSetHeader>(
           `UPDATE customers
-           SET name = ?, phone = ?, birth_date = ?, preferred_cut = ?, beard_style = ?, notes = ?,
+           SET whatsapp_opted_in_at = CASE
+                 WHEN ? = TRUE AND (whatsapp_opt_in = FALSE OR phone <> ?) THEN UTC_TIMESTAMP()
+                 ELSE whatsapp_opted_in_at
+               END,
+               whatsapp_opted_out_at = CASE
+                 WHEN ? = FALSE AND whatsapp_opt_in = TRUE THEN UTC_TIMESTAMP()
+                 ELSE whatsapp_opted_out_at
+               END,
+               whatsapp_opt_in = ?,
+               name = ?, phone = ?, birth_date = ?, preferred_cut = ?, beard_style = ?, notes = ?,
                pending_email = ?
            WHERE id = ?`,
           [...profileValues, data.email, customer.id],
@@ -192,7 +228,16 @@ export async function PATCH(request: Request) {
       } else {
         await connection.execute<ResultSetHeader>(
           `UPDATE customers
-           SET name = ?, phone = ?, birth_date = ?, preferred_cut = ?, beard_style = ?, notes = ?
+           SET whatsapp_opted_in_at = CASE
+                 WHEN ? = TRUE AND (whatsapp_opt_in = FALSE OR phone <> ?) THEN UTC_TIMESTAMP()
+                 ELSE whatsapp_opted_in_at
+               END,
+               whatsapp_opted_out_at = CASE
+                 WHEN ? = FALSE AND whatsapp_opt_in = TRUE THEN UTC_TIMESTAMP()
+                 ELSE whatsapp_opted_out_at
+               END,
+               whatsapp_opt_in = ?,
+               name = ?, phone = ?, birth_date = ?, preferred_cut = ?, beard_style = ?, notes = ?
            WHERE id = ?`,
           [...profileValues, customer.id],
         )

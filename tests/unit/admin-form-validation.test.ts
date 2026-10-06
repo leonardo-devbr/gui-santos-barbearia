@@ -72,6 +72,8 @@ describe('validação dos formulários administrativos', () => {
         password: 'curta',
         passwordConfirmation: 'diferente',
         currentPassword: '',
+        notificationPhone: '',
+        whatsappOptIn: true,
       },
       false,
     )
@@ -83,6 +85,7 @@ describe('validação dos formulários administrativos', () => {
       password: 'Use ao menos 12 caracteres, incluindo uma letra e um número.',
       passwordConfirmation: 'A confirmação não corresponde à senha informada.',
       currentPassword: 'Informe sua senha atual para confirmar esta operação.',
+      notificationPhone: 'Informe um telefone brasileiro válido para ativar os avisos.',
     })
   })
 
@@ -96,6 +99,8 @@ describe('validação dos formulários administrativos', () => {
         password: '',
         passwordConfirmation: '',
         currentPassword: 'senha-atual',
+        notificationPhone: '',
+        whatsappOptIn: false,
       },
       true,
     )
@@ -103,5 +108,44 @@ describe('validação dos formulários administrativos', () => {
     expect(result.errors).toEqual({})
     expect(result.data.email).toBe('admin@example.com')
     expect(result.data.barberId).toBeNull()
+  })
+
+  it('normaliza o telefone e exige um número brasileiro ao ativar o WhatsApp', () => {
+    const valid = validateAdminUserForm(
+      {
+        role: 'admin',
+        barberId: '',
+        name: 'Administrador',
+        email: 'admin@example.com',
+        password: '',
+        passwordConfirmation: '',
+        currentPassword: 'senha-atual',
+        notificationPhone: '(15) 99999-1234',
+        whatsappOptIn: true,
+      },
+      true,
+    )
+
+    expect(valid.errors).toEqual({})
+    expect(valid.data).toMatchObject({
+      notificationPhone: '15999991234',
+      whatsappOptIn: true,
+    })
+
+    const invalid = validateAdminUserForm(
+      {
+        role: 'admin',
+        barberId: '',
+        name: 'Administrador',
+        email: 'admin@example.com',
+        password: '',
+        passwordConfirmation: '',
+        currentPassword: 'senha-atual',
+        notificationPhone: '',
+        whatsappOptIn: true,
+      },
+      true,
+    )
+    expect(invalid.errors.notificationPhone).toContain('telefone brasileiro válido')
   })
 })

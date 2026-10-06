@@ -12,6 +12,7 @@ describe('validação do perfil do barbeiro', () => {
       currentPassword: '',
       newPassword: '',
       passwordConfirmation: '',
+      whatsappOptIn: true,
     })
 
     expect(result.errors).toEqual({})
@@ -33,6 +34,7 @@ describe('validação do perfil do barbeiro', () => {
       currentPassword: '',
       newPassword: 'NovaSenha1234',
       passwordConfirmation: 'OutraSenha1234',
+      whatsappOptIn: false,
     })
 
     expect(result.errors).toMatchObject({
@@ -50,10 +52,28 @@ describe('validação do perfil do barbeiro', () => {
       currentPassword: 'senha-atual',
       newPassword: 'curta',
       passwordConfirmation: 'curta',
+      whatsappOptIn: false,
     })
 
     expect(result.errors.phone).toBe('Informe um telefone com DDD ou deixe o campo em branco.')
     expect(result.errors.newPassword).toContain('12 caracteres')
+  })
+
+  it('exige telefone brasileiro válido quando o barbeiro aceita os avisos', () => {
+    const result = validateBarberProfileForm({
+      name: 'João da Silva',
+      phone: '',
+      specialty: 'Corte clássico',
+      bio: 'Atendimento cuidadoso.',
+      currentPassword: '',
+      newPassword: '',
+      passwordConfirmation: '',
+      whatsappOptIn: true,
+    })
+
+    expect(result.errors.phone).toBe(
+      'Informe um telefone brasileiro válido para ativar os avisos.',
+    )
   })
 })
 

@@ -13,7 +13,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import type { CustomerProfile } from '@/lib/types'
-import { formatPhone, isValidEmail, normalizeEmail, normalizePhone } from '@/lib/validation'
+import {
+  formatPhone,
+  isValidBrazilianPhone,
+  isValidEmail,
+  normalizeEmail,
+  normalizePhone,
+} from '@/lib/validation'
 
 type ProfileField =
   | 'name'
@@ -24,6 +30,7 @@ type ProfileField =
   | 'beardStyle'
   | 'notes'
   | 'currentPassword'
+  | 'whatsappOptIn'
 
 type ProfileErrors = Partial<Record<ProfileField, string>>
 
@@ -45,6 +52,7 @@ export function ProfileForm({ customer, today }: { customer: CustomerProfile; to
     beardStyle: customer.beardStyle,
     notes: customer.notes,
     currentPassword: '',
+    whatsappOptIn: customer.whatsappOptIn,
   })
   const [errors, setErrors] = useState<ProfileErrors>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -63,12 +71,25 @@ export function ProfileForm({ customer, today }: { customer: CustomerProfile; to
     setSubmitError(null)
   }
 
+  function updateWhatsappOptIn(value: boolean) {
+    setForm((prev) => ({ ...prev, whatsappOptIn: value }))
+    setErrors((current) => {
+      if (!current.whatsappOptIn) return current
+      const next = { ...current }
+      delete next.whatsappOptIn
+      return next
+    })
+    setSubmitError(null)
+  }
+
   function validate() {
     const validationErrors: ProfileErrors = {}
     const phoneDigits = normalizePhone(form.phone)
     if (form.name.trim().length < 3) validationErrors.name = 'Informe seu nome completo.'
     if (phoneDigits.length < 10 || phoneDigits.length > 11) {
       validationErrors.phone = 'Informe um telefone com DDD.'
+    } else if (form.whatsappOptIn && !isValidBrazilianPhone(form.phone)) {
+      validationErrors.phone = 'Informe um telefone brasileiro válido para receber avisos no WhatsApp.'
     }
     if (!isValidEmail(form.email)) validationErrors.email = 'Informe um e-mail válido.'
     if (normalizeEmail(form.email) !== customer.email && !form.currentPassword) {
@@ -297,6 +318,42 @@ export function ProfileForm({ customer, today }: { customer: CustomerProfile; to
               <FieldError id="profile-notes-error">{errors.notes}</FieldError>
             </Field>
           </FieldGroup>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="flex flex-col gap-4">
+          <h2 className="font-serif text-lg text-card-foreground">Avisos pelo WhatsApp</h2>
+          <Field data-invalid={Boolean(errors.whatsappOptIn)}>
+            <label
+              htmlFor="profile-whatsapp-opt-in"
+              className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-muted/30 p-4 text-sm leading-relaxed"
+            >
+              <input
+                id="profile-whatsapp-opt-in"
+                name="whatsappOptIn"
+                type="checkbox"
+                checked={form.whatsappOptIn}
+                className="mt-0.5 size-4 shrink-0 accent-primary"
+                aria-invalid={Boolean(errors.whatsappOptIn)}
+                aria-describedby={
+                  errors.whatsappOptIn
+                    ? 'profile-whatsapp-error profile-whatsapp-description'
+                    : 'profile-whatsapp-description'
+                }
+                onChange={(event) => updateWhatsappOptIn(event.target.checked)}
+              />
+              <span>
+                Aceito receber da Gui Santos Barbearia confirmações e lembretes dos meus
+                agendamentos pelo WhatsApp.
+              </span>
+            </label>
+            <p id="profile-whatsapp-description" className="text-xs text-muted-foreground">
+              Você pode retirar o consentimento quando quiser. O telefone usado será o informado
+              nos seus dados pessoais.
+            </p>
+            <FieldError id="profile-whatsapp-error">{errors.whatsappOptIn}</FieldError>
+          </Field>
         </CardContent>
       </Card>
 

@@ -7,7 +7,13 @@ import type { AdminUserFormField } from '@/lib/admin-form-validation'
 import { hashPassword, verifyPassword } from '@/lib/auth'
 import { getPool, withTransaction } from '@/lib/db'
 import type { StaffAccount, StaffRole } from '@/lib/types'
-import { isValidEmail, MAX_PASSWORD_LENGTH, normalizeEmail } from '@/lib/validation'
+import {
+  isValidBrazilianPhone,
+  isValidEmail,
+  MAX_PASSWORD_LENGTH,
+  normalizeEmail,
+  normalizePhone,
+} from '@/lib/validation'
 
 interface StaffAccountRow extends RowDataPacket {
   id: string
@@ -16,6 +22,8 @@ interface StaffAccountRow extends RowDataPacket {
   role: StaffRole
   barber_id: string | null
   barber_name: string | null
+  notification_phone: string
+  whatsapp_opt_in: number | boolean
   is_active: number | boolean
 }
 
@@ -65,6 +73,8 @@ function mapStaffAccount(row: StaffAccountRow, currentAdminId: string): StaffAcc
     role: row.role,
     barberId: row.barber_id,
     barberName: row.barber_name,
+    notificationPhone: row.notification_phone,
+    whatsappOptIn: Boolean(row.whatsapp_opt_in),
     isActive: Boolean(row.is_active),
     isCurrent: row.id === currentAdminId,
   }
@@ -98,6 +108,36 @@ function validateAccess(body: Record<string, unknown>) {
     role,
     barberId: role === 'barber' ? rawBarberId : null,
   } satisfies { role: StaffRole; barberId: string | null }
+}
+
+function validateWhatsappPreference(body: Record<string, unknown>) {
+  const rawPhone = typeof body.notificationPhone === 'string' ? body.notificationPhone : ''
+  const notificationPhone = normalizePhone(rawPhone)
+  const whatsappOptIn = body.whatsappOptIn === true
+
+  if (typeof body.whatsappOptIn !== 'boolean') {
+    throw new AdminUserError(
+      'Informe uma preferência válida para os avisos no WhatsApp.',
+      422,
+      'whatsappOptIn',
+    )
+  }
+  if (notificationPhone && !isValidBrazilianPhone(rawPhone)) {
+    throw new AdminUserError(
+      'Informe um telefone brasileiro válido ou deixe o campo em branco.',
+      422,
+      'notificationPhone',
+    )
+  }
+  if (whatsappOptIn && !isValidBrazilianPhone(rawPhone)) {
+    throw new AdminUserError(
+      'Informe um telefone brasileiro válido para ativar os avisos.',
+      422,
+      'notificationPhone',
+    )
+  }
+
+  return { notificationPhone, whatsappOptIn }
 }
 
 function validatePassword(value: unknown, required: boolean) {
@@ -201,6 +241,8 @@ export async function getStaffAccounts() {
        staff_users.role,
        staff_users.barber_id,
        barbers.name AS barber_name,
+       staff_users.notification_phone,
+       staff_users.whatsapp_opt_in,
        staff_users.is_active
      FROM staff_users
      LEFT JOIN barbers ON barbers.id = staff_users.barber_id
@@ -215,6 +257,7 @@ export async function createStaffAccount(body: Record<string, unknown>) {
   if (!sessionTokenHash) throw new AdminUserError('Acesso administrativo não autorizado.', 401)
   const identity = validateIdentity(body)
   const access = validateAccess(body)
+  const whatsapp = validateWhatsappPreference(body)
   const password = validatePassword(body.password, true)!
   const passwordHash = await hashPassword(password)
 
@@ -226,15 +269,27 @@ export async function createStaffAccount(body: Record<string, unknown>) {
     const id = randomUUID()
     await connection.execute<ResultSetHeader>(
       `INSERT INTO staff_users
-        (id, name, email, password_hash, role, barber_id, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, TRUE)`,
-      [id, identity.name, identity.email, passwordHash, access.role, access.barberId],
+        (id, name, email, password_hash, role, barber_id, notification_phone,
+         whatsapp_opt_in, whatsapp_opted_in_at, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, IF(?, UTC_TIMESTAMP(), NULL), TRUE)`,
+      [
+        id,
+        identity.name,
+        identity.email,
+        passwordHash,
+        access.role,
+        access.barberId,
+        whatsapp.notificationPhone,
+        whatsapp.whatsappOptIn,
+        whatsapp.whatsappOptIn,
+      ],
     )
 
     return {
       id,
       ...identity,
       ...access,
+      ...whatsapp,
       barberName: barber?.name ?? null,
       isActive: true,
       isCurrent: false,
@@ -249,6 +304,7 @@ export async function updateStaffAccount(id: string, body: Record<string, unknow
   if (!id || id.length > 64) throw new AdminUserError('Conta de acesso não encontrada.', 404)
   const identity = validateIdentity(body)
   const access = validateAccess(body)
+  const whatsapp = validateWhatsappPreference(body)
   const password = validatePassword(body.password, false)
   const isActive = body.isActive === true
 
@@ -277,7 +333,18 @@ export async function updateStaffAccount(id: string, body: Record<string, unknow
     if (passwordHash) {
       await connection.execute<ResultSetHeader>(
         `UPDATE staff_users
-         SET name = ?, email = ?, password_hash = ?, role = ?, barber_id = ?, is_active = ?
+         SET name = ?, email = ?, password_hash = ?, role = ?, barber_id = ?,
+             whatsapp_opted_in_at = CASE
+               WHEN ? = TRUE AND (
+                 whatsapp_opt_in = FALSE OR notification_phone <> ?
+               ) THEN UTC_TIMESTAMP()
+               ELSE whatsapp_opted_in_at
+             END,
+             whatsapp_opted_out_at = CASE
+               WHEN ? = FALSE AND whatsapp_opt_in = TRUE THEN UTC_TIMESTAMP()
+               ELSE whatsapp_opted_out_at
+             END,
+             whatsapp_opt_in = ?, notification_phone = ?, is_active = ?
          WHERE id = ?`,
         [
           identity.name,
@@ -285,6 +352,11 @@ export async function updateStaffAccount(id: string, body: Record<string, unknow
           passwordHash,
           access.role,
           access.barberId,
+          whatsapp.whatsappOptIn,
+          whatsapp.notificationPhone,
+          whatsapp.whatsappOptIn,
+          whatsapp.whatsappOptIn,
+          whatsapp.notificationPhone,
           isActive,
           id,
         ],
@@ -292,9 +364,32 @@ export async function updateStaffAccount(id: string, body: Record<string, unknow
     } else {
       await connection.execute<ResultSetHeader>(
         `UPDATE staff_users
-         SET name = ?, email = ?, role = ?, barber_id = ?, is_active = ?
+         SET name = ?, email = ?, role = ?, barber_id = ?,
+             whatsapp_opted_in_at = CASE
+               WHEN ? = TRUE AND (
+                 whatsapp_opt_in = FALSE OR notification_phone <> ?
+               ) THEN UTC_TIMESTAMP()
+               ELSE whatsapp_opted_in_at
+             END,
+             whatsapp_opted_out_at = CASE
+               WHEN ? = FALSE AND whatsapp_opt_in = TRUE THEN UTC_TIMESTAMP()
+               ELSE whatsapp_opted_out_at
+             END,
+             whatsapp_opt_in = ?, notification_phone = ?, is_active = ?
          WHERE id = ?`,
-        [identity.name, identity.email, access.role, access.barberId, isActive, id],
+        [
+          identity.name,
+          identity.email,
+          access.role,
+          access.barberId,
+          whatsapp.whatsappOptIn,
+          whatsapp.notificationPhone,
+          whatsapp.whatsappOptIn,
+          whatsapp.whatsappOptIn,
+          whatsapp.notificationPhone,
+          isActive,
+          id,
+        ],
       )
     }
 
@@ -312,6 +407,7 @@ export async function updateStaffAccount(id: string, body: Record<string, unknow
         id,
         ...identity,
         ...access,
+        ...whatsapp,
         barberName: barber?.name ?? null,
         isActive,
         isCurrent: id === admin.id,

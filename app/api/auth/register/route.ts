@@ -18,12 +18,13 @@ import {
 } from '@/lib/rate-limit'
 import {
   getPasswordError,
+  isValidBrazilianPhone,
   isValidEmail,
   normalizeEmail,
   normalizePhone,
 } from '@/lib/validation'
 
-type RegistrationField = 'name' | 'phone' | 'email' | 'password'
+type RegistrationField = 'name' | 'phone' | 'email' | 'password' | 'whatsappOptIn'
 
 interface ExistingCustomerRow extends RowDataPacket {
   id: string
@@ -49,6 +50,7 @@ function validateRegistration(body: Record<string, unknown>) {
   const phone = normalizePhone(rawPhone)
   const email = typeof body.email === 'string' ? normalizeEmail(body.email) : ''
   const password = typeof body.password === 'string' ? body.password : ''
+  const whatsappOptIn = body.whatsappOptIn === true
   const errors: Partial<Record<RegistrationField, string>> = {}
 
   if (name.length < 3) errors.name = 'Informe seu nome completo.'
@@ -56,6 +58,12 @@ function validateRegistration(body: Record<string, unknown>) {
 
   if (phoneDigits.length < 10 || phoneDigits.length > 11) {
     errors.phone = 'Informe um telefone com DDD.'
+  } else if (whatsappOptIn && !isValidBrazilianPhone(phone)) {
+    errors.phone = 'Informe um telefone brasileiro válido para receber avisos no WhatsApp.'
+  }
+
+  if (body.whatsappOptIn !== undefined && typeof body.whatsappOptIn !== 'boolean') {
+    errors.whatsappOptIn = 'Informe uma preferência válida para os avisos no WhatsApp.'
   }
 
   if (!isValidEmail(email) || email.length > 254) errors.email = 'Informe um e-mail válido.'
@@ -63,7 +71,7 @@ function validateRegistration(body: Record<string, unknown>) {
   const passwordError = getPasswordError(password)
   if (passwordError) errors.password = passwordError
 
-  return { data: { name, phone, email, password }, errors }
+  return { data: { name, phone, email, password, whatsappOptIn }, errors }
 }
 
 export async function POST(request: Request) {
@@ -134,8 +142,18 @@ export async function POST(request: Request) {
 
       const id = randomUUID()
       await connection.execute<ResultSetHeader>(
-        'INSERT INTO customers (id, name, phone, email, password_hash) VALUES (?, ?, ?, ?, ?)',
-        [id, data.name, data.phone, data.email, passwordHash],
+        `INSERT INTO customers
+          (id, name, phone, email, password_hash, whatsapp_opt_in, whatsapp_opted_in_at)
+         VALUES (?, ?, ?, ?, ?, ?, IF(?, UTC_TIMESTAMP(), NULL))`,
+        [
+          id,
+          data.name,
+          data.phone,
+          data.email,
+          passwordHash,
+          data.whatsappOptIn,
+          data.whatsappOptIn,
+        ],
       )
       await connection.execute<ResultSetHeader>(
         `INSERT INTO email_verification_tokens
