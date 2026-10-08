@@ -13,6 +13,7 @@ import {
   getClientIdentifier,
   rateLimitResponse,
 } from '@/lib/rate-limit'
+import { processWhatsAppAfterResponse } from '@/lib/whatsapp-after'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -49,7 +50,10 @@ export async function PATCH(request: Request, context: RouteContext) {
     if (!id || id.length > 64) return errorResponse('Agendamento não encontrado.', 404)
 
     const changed = await rescheduleAppointment(customer.id, id, input)
-    if (changed) await notifyAppointment(id, 'appointment_rescheduled')
+    if (changed) {
+      await notifyAppointment(id, 'appointment_rescheduled')
+      processWhatsAppAfterResponse(id)
+    }
     return NextResponse.json({
       message: changed ? 'Agendamento remarcado com sucesso.' : 'O agendamento já está atualizado.',
     })
@@ -86,6 +90,7 @@ export async function DELETE(request: Request, context: RouteContext) {
 
     await cancelAppointment(customer.id, id)
     await notifyAppointment(id, 'appointment_cancelled')
+    processWhatsAppAfterResponse(id)
     return NextResponse.json({ message: 'Agendamento cancelado com sucesso.' })
   } catch (error) {
     if (error instanceof AppointmentError) return errorResponse(error.message, error.status)

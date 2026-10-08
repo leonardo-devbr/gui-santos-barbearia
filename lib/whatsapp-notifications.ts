@@ -828,6 +828,32 @@ export async function processWhatsAppNotificationIds(ids: string[]) {
   return processInBatches(uniqueIds)
 }
 
+export async function processImmediateAppointmentWhatsAppNotifications(
+  appointmentId: string,
+) {
+  const [notifications] = await getPool().execute<NotificationIdRow[]>(
+    `SELECT whatsapp_notifications.id
+     FROM whatsapp_notifications
+     INNER JOIN appointments
+       ON appointments.id = whatsapp_notifications.appointment_id
+       AND appointments.notification_revision = whatsapp_notifications.appointment_revision
+     WHERE whatsapp_notifications.appointment_id = ?
+       AND whatsapp_notifications.status = 'pending'
+       AND whatsapp_notifications.event IN (
+         'appointment_created',
+         'appointment_rescheduled',
+         'appointment_cancelled'
+       )
+       AND whatsapp_notifications.scheduled_for <= UTC_TIMESTAMP()
+       AND whatsapp_notifications.next_attempt_at <= UTC_TIMESTAMP()
+     ORDER BY whatsapp_notifications.created_at ASC
+     LIMIT ${notificationBatchSize}`,
+    [appointmentId],
+  )
+
+  return processWhatsAppNotificationIds(notifications.map(({ id }) => id))
+}
+
 export async function processWhatsAppNotifications(): Promise<WhatsAppProcessingResult> {
   const pool = getPool()
 

@@ -38,6 +38,7 @@ interface AppointmentDatabaseRow extends RowDataPacket {
   status: string
   price: number
   duration_minutes: number
+  notification_revision: number
 }
 
 interface CountRow extends RowDataPacket {
@@ -62,6 +63,7 @@ interface SchemaColumnRow extends RowDataPacket {
 
 interface WhatsAppNotificationDatabaseRow extends RowDataPacket {
   id: string
+  appointment_revision: number
   event: string
   audience: string
   recipient_kind: string
@@ -759,9 +761,10 @@ describe('fila de avisos do WhatsApp com MySQL', () => {
     )
 
     const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined)
-    const outcomes = await whatsappNotificationModule.processWhatsAppNotificationIds(
-      queued.immediateNotificationIds,
-    )
+    const outcomes =
+      await whatsappNotificationModule.processImmediateAppointmentWhatsAppNotifications(
+        appointmentId,
+      )
     expect(outcomes).toEqual(['previewed', 'previewed', 'previewed'])
     expect(consoleSpy).toHaveBeenCalledTimes(3)
 
@@ -787,6 +790,152 @@ describe('fila de avisos do WhatsApp com MySQL', () => {
       [appointmentId],
     )
     expect(countRows[0].total).toBe(9)
+  })
+
+  it('substitui avisos antigos e notifica as duas agendas em uma remarcação real', async () => {
+    const customerId = await createCustomer('whatsapp-remarcacao-real')
+    await enableCustomerWhatsApp(customerId)
+    const previousStaffId = await createBarberStaff('guilherme')
+    await enableStaffWhatsApp(previousStaffId, '15977776666')
+    const currentStaffId = await createBarberStaff('vitor')
+    await enableStaffWhatsApp(currentStaffId, '15988887777')
+    await enableStaffWhatsApp(staffUserId, '15999998888')
+    const date = findOpenDateAtLeast(8)
+    const appointmentId = await appointmentModule.createAppointment(
+      customerId,
+      appointmentInput(date, '14:00', 'guilherme'),
+    )
+
+    await expect(
+      appointmentModule.rescheduleAppointment(
+        customerId,
+        appointmentId,
+        appointmentInput(date, '16:00', 'vitor'),
+      ),
+    ).resolves.toBe(true)
+
+    const [appointmentRows] = await applicationPool.execute<AppointmentDatabaseRow[]>(
+      'SELECT * FROM appointments WHERE id = ?',
+      [appointmentId],
+    )
+    expect(appointmentRows[0]).toMatchObject({
+      barber_id: 'vitor',
+      appointment_time: '16:00:00',
+      notification_revision: 2,
+    })
+
+    const [rows] = await applicationPool.execute<WhatsAppNotificationDatabaseRow[]>(
+      `SELECT id, appointment_revision, event, audience, recipient_kind, recipient_id,
+        status, attempts, scheduled_for, next_attempt_at
+       FROM whatsapp_notifications
+       WHERE appointment_id = ?`,
+      [appointmentId],
+    )
+    const oldRows = rows.filter(({ appointment_revision }) => appointment_revision === 1)
+    expect(oldRows.length).toBeGreaterThan(0)
+    expect(oldRows.every(({ status }) => status === 'superseded')).toBe(true)
+    const currentRows = rows.filter(({ appointment_revision }) => appointment_revision === 2)
+    expect(currentRows.filter(({ event }) => event === 'appointment_rescheduled')).toHaveLength(4)
+    expect(currentRows.filter(({ event }) => event === 'reminder_24h')).toHaveLength(3)
+    expect(currentRows.filter(({ event }) => event === 'reminder_2h')).toHaveLength(3)
+    expect(
+      currentRows.some(
+        ({ event, recipient_id }) =>
+          event === 'appointment_rescheduled' && recipient_id === previousStaffId,
+      ),
+    ).toBe(true)
+  })
+
+  it('cancela de forma transacional e invalida os lembretes anteriores', async () => {
+    const customerId = await createCustomer('whatsapp-cancelamento-real')
+    await enableCustomerWhatsApp(customerId)
+    const barberStaffId = await createBarberStaff('guilherme')
+    await enableStaffWhatsApp(barberStaffId, '15988887777')
+    await enableStaffWhatsApp(staffUserId, '15999998888')
+    const date = findOpenDateAtLeast(8)
+    const appointmentId = await appointmentModule.createAppointment(
+      customerId,
+      appointmentInput(date, '14:00'),
+    )
+
+    await appointmentModule.cancelAppointment(customerId, appointmentId)
+
+    const [appointmentRows] = await applicationPool.execute<AppointmentDatabaseRow[]>(
+      'SELECT * FROM appointments WHERE id = ?',
+      [appointmentId],
+    )
+    expect(appointmentRows[0]).toMatchObject({
+      status: 'cancelado',
+      notification_revision: 2,
+    })
+    const [rows] = await applicationPool.execute<WhatsAppNotificationDatabaseRow[]>(
+      `SELECT id, appointment_revision, event, audience, recipient_kind, recipient_id,
+        status, attempts, scheduled_for, next_attempt_at
+       FROM whatsapp_notifications
+       WHERE appointment_id = ?`,
+      [appointmentId],
+    )
+    expect(
+      rows
+        .filter(({ appointment_revision }) => appointment_revision === 1)
+        .every(({ status }) => status === 'superseded'),
+    ).toBe(true)
+    expect(
+      rows.filter(
+        ({ appointment_revision, event }) =>
+          appointment_revision === 2 && event === 'appointment_cancelled',
+      ),
+    ).toHaveLength(3)
+    expect(
+      rows.some(
+        ({ appointment_revision, event }) =>
+          appointment_revision === 2 && event.startsWith('reminder_'),
+      ),
+    ).toBe(false)
+  })
+
+  it('encerra os lembretes sem criar um evento inexistente ao concluir', async () => {
+    const customerId = await createCustomer('whatsapp-conclusao-real')
+    await enableCustomerWhatsApp(customerId)
+    await enableStaffWhatsApp(staffUserId, '15999998888')
+    const date = findPreviousOpenDate()
+    const appointmentId = randomUUID()
+    await applicationPool.execute<ResultSetHeader>(
+      `INSERT INTO appointments
+        (id, customer_id, service_id, barber_id, appointment_date, appointment_time,
+         status, price, duration_minutes)
+       VALUES (?, ?, 'corte', 'guilherme', ?, '09:00:00', 'confirmado', 40, 45)`,
+      [appointmentId, customerId, date],
+    )
+    await databaseModule.withTransaction((connection) =>
+      whatsappNotificationModule.queueAppointmentWhatsAppNotifications(connection, {
+        appointmentId,
+        event: 'appointment_created',
+      }),
+    )
+    await activateStaffSession(staffUserId)
+
+    await expect(
+      adminAppointmentModule.updateAdminAppointmentStatus(appointmentId, 'concluido'),
+    ).resolves.toBe(true)
+
+    const [appointmentRows] = await applicationPool.execute<AppointmentDatabaseRow[]>(
+      'SELECT * FROM appointments WHERE id = ?',
+      [appointmentId],
+    )
+    expect(appointmentRows[0]).toMatchObject({
+      status: 'concluido',
+      notification_revision: 2,
+    })
+    const [rows] = await applicationPool.execute<WhatsAppNotificationDatabaseRow[]>(
+      `SELECT id, appointment_revision, event, audience, recipient_kind, recipient_id,
+        status, attempts, scheduled_for, next_attempt_at
+       FROM whatsapp_notifications
+       WHERE appointment_id = ?`,
+      [appointmentId],
+    )
+    expect(rows.every(({ status }) => status === 'superseded')).toBe(true)
+    expect(rows.some(({ appointment_revision }) => appointment_revision === 2)).toBe(false)
   })
 
   it('avisa o barbeiro anterior na remarcação sem criar lembretes para a agenda antiga', async () => {

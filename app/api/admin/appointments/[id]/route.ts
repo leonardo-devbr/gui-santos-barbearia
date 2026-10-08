@@ -5,6 +5,7 @@ import {
   updateAdminAppointmentStatus,
 } from '@/lib/admin-appointments'
 import { notifyAppointment } from '@/lib/email-notifications'
+import { processWhatsAppAfterResponse } from '@/lib/whatsapp-after'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -26,6 +27,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     const statusChanged = await updateAdminAppointmentStatus(id, status)
     if (statusChanged && status === 'cancelado') {
       await notifyAppointment(id, 'appointment_cancelled')
+      processWhatsAppAfterResponse(id)
     }
     return NextResponse.json({ message: 'Agendamento atualizado com sucesso.' })
   } catch (error) {

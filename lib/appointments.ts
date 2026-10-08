@@ -9,6 +9,7 @@ import {
 import { addDaysToIsoDate, getNowInSaoPaulo, isValidIsoDate, isValidTime } from '@/lib/date'
 import { getPool, withTransaction } from '@/lib/db'
 import type { Appointment, AppointmentStatus, TimeSlot } from '@/lib/types'
+import { queueAppointmentWhatsAppNotifications } from '@/lib/whatsapp-notifications'
 
 interface AppointmentRow extends RowDataPacket {
   id: string
@@ -72,6 +73,7 @@ interface OwnedAppointmentRow extends RowDataPacket {
   status: AppointmentStatus
   appointment_date: string
   appointment_time: string
+  notification_revision: number
 }
 
 const MAX_ACTIVE_APPOINTMENTS = 5
@@ -657,6 +659,11 @@ export async function createAppointment(customerId: string, input: AppointmentIn
       ],
     )
 
+    await queueAppointmentWhatsAppNotifications(connection, {
+      appointmentId: id,
+      event: 'appointment_created',
+    })
+
     return id
   })
 }
@@ -670,7 +677,8 @@ export async function rescheduleAppointment(
     await lockCustomer(connection, customerId)
 
     const [appointmentRows] = await connection.execute<OwnedAppointmentRow[]>(
-      `SELECT id, service_id, barber_id, status, appointment_date, appointment_time
+      `SELECT id, service_id, barber_id, status, appointment_date, appointment_time,
+        notification_revision
        FROM appointments
        WHERE id = ? AND customer_id = ?
        LIMIT 1
@@ -709,7 +717,8 @@ export async function rescheduleAppointment(
     await connection.execute<ResultSetHeader>(
       `UPDATE appointments
        SET service_id = ?, barber_id = ?, appointment_date = ?, appointment_time = ?,
-           status = 'confirmado', price = ?, duration_minutes = ?
+           status = 'confirmado', price = ?, duration_minutes = ?,
+           notification_revision = notification_revision + 1
        WHERE id = ?`,
       [
         input.serviceId,
@@ -722,31 +731,52 @@ export async function rescheduleAppointment(
       ],
     )
 
+    await queueAppointmentWhatsAppNotifications(connection, {
+      appointmentId,
+      event: 'appointment_rescheduled',
+      ...(appointment.barber_id !== input.barberId
+        ? { previousBarberId: appointment.barber_id }
+        : {}),
+    })
+
     return true
   })
 }
 
 export async function cancelAppointment(customerId: string, appointmentId: string) {
-  const now = getNowInSaoPaulo()
-  const [result] = await getPool().execute<ResultSetHeader>(
-    `UPDATE appointments
-     SET status = 'cancelado'
-     WHERE id = ?
-       AND customer_id = ?
-       AND status = 'confirmado'
-       AND (appointment_date > ? OR (appointment_date = ? AND appointment_time > ?))`,
-    [appointmentId, customerId, now.date, now.date, `${now.time}:00`],
-  )
+  return withTransaction(async (connection) => {
+    await lockCustomer(connection, customerId)
 
-  if (result.affectedRows > 0) return
+    const [rows] = await connection.execute<OwnedAppointmentRow[]>(
+      `SELECT id, service_id, barber_id, status, appointment_date, appointment_time,
+        notification_revision
+       FROM appointments
+       WHERE id = ? AND customer_id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [appointmentId, customerId],
+    )
+    const appointment = rows[0]
+    if (!appointment) throw new AppointmentError('Agendamento não encontrado.', 404)
 
-  const [rows] = await getPool().execute<OwnedAppointmentRow[]>(
-    `SELECT id, service_id, barber_id, status, appointment_date, appointment_time
-     FROM appointments
-     WHERE id = ? AND customer_id = ?
-     LIMIT 1`,
-    [appointmentId, customerId],
-  )
-  if (!rows[0]) throw new AppointmentError('Agendamento não encontrado.', 404)
-  throw new AppointmentError('Este agendamento não pode mais ser cancelado.', 409)
+    const now = getNowInSaoPaulo()
+    const isFuture =
+      appointment.appointment_date > now.date ||
+      (appointment.appointment_date === now.date &&
+        appointment.appointment_time.slice(0, 5) > now.time)
+    if (appointment.status !== 'confirmado' || !isFuture) {
+      throw new AppointmentError('Este agendamento não pode mais ser cancelado.', 409)
+    }
+
+    await connection.execute<ResultSetHeader>(
+      `UPDATE appointments
+       SET status = 'cancelado', notification_revision = notification_revision + 1
+       WHERE id = ?`,
+      [appointmentId],
+    )
+    await queueAppointmentWhatsAppNotifications(connection, {
+      appointmentId,
+      event: 'appointment_cancelled',
+    })
+  })
 }

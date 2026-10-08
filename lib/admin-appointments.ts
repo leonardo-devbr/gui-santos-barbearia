@@ -5,6 +5,10 @@ import { getAuthenticatedStaff } from '@/lib/admin-auth'
 import { getNowInSaoPaulo, getTodayInSaoPaulo, isValidIsoDate } from '@/lib/date'
 import { getPool, withTransaction } from '@/lib/db'
 import type { AdminAppointment, AppointmentStatus } from '@/lib/types'
+import {
+  queueAppointmentWhatsAppNotifications,
+  supersedeAppointmentWhatsAppNotifications,
+} from '@/lib/whatsapp-notifications'
 
 interface AdminAppointmentRow extends RowDataPacket {
   id: string
@@ -28,6 +32,7 @@ interface AppointmentStatusRow extends RowDataPacket {
   barber_id: string
   appointment_date: string
   appointment_time: string
+  notification_revision: number
 }
 
 interface DashboardRow extends RowDataPacket {
@@ -212,7 +217,7 @@ export async function updateAdminAppointmentStatus(
     const barberClause = staff.role === 'barber' ? 'AND barber_id = ?' : ''
     const parameters = staff.role === 'barber' ? [appointmentId, staff.barberId!] : [appointmentId]
     const [rows] = await connection.execute<AppointmentStatusRow[]>(
-      `SELECT status, barber_id, appointment_date, appointment_time
+      `SELECT status, barber_id, appointment_date, appointment_time, notification_revision
        FROM appointments
        WHERE id = ? ${barberClause}
        LIMIT 1
@@ -240,10 +245,25 @@ export async function updateAdminAppointmentStatus(
       )
     }
 
-    await connection.execute<ResultSetHeader>('UPDATE appointments SET status = ? WHERE id = ?', [
-      nextStatus,
-      appointmentId,
-    ])
+    await connection.execute<ResultSetHeader>(
+      `UPDATE appointments
+       SET status = ?, notification_revision = notification_revision + 1
+       WHERE id = ?`,
+      [nextStatus, appointmentId],
+    )
+
+    if (nextStatus === 'cancelado') {
+      await queueAppointmentWhatsAppNotifications(connection, {
+        appointmentId,
+        event: 'appointment_cancelled',
+      })
+    } else {
+      await supersedeAppointmentWhatsAppNotifications(connection, {
+        appointmentId,
+        revision: appointment.notification_revision + 1,
+        reason: 'O atendimento foi concluído; os lembretes pendentes não são mais necessários.',
+      })
+    }
     return true
   })
 }

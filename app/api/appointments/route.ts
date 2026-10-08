@@ -13,6 +13,7 @@ import {
   getClientIdentifier,
   rateLimitResponse,
 } from '@/lib/rate-limit'
+import { processWhatsAppAfterResponse } from '@/lib/whatsapp-after'
 
 export async function GET(request: Request) {
   try {
@@ -55,6 +56,7 @@ export async function POST(request: Request) {
 
     const id = await createAppointment(customer.id, input)
     await notifyAppointment(id, 'appointment_created')
+    processWhatsAppAfterResponse(id)
     return NextResponse.json({ id, message: 'Agendamento confirmado com sucesso.' }, { status: 201 })
   } catch (error) {
     if (error instanceof AppointmentError) return errorResponse(error.message, error.status)
