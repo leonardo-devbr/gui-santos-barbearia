@@ -14,6 +14,7 @@ O projeto está preparado para rodar no plano Developer Sandbox do Northflank co
 - Base UI e Lucide Icons
 - MySQL 8 para persistência de clientes, sessões, catálogo e agendamentos
 - Nodemailer e SMTP para e-mails transacionais
+- WhatsApp Cloud API oficial da Meta para confirmações e lembretes
 - Vitest, React Testing Library e MySQL isolado para testes automatizados
 
 ## Como rodar o projeto localmente
@@ -41,6 +42,7 @@ npm --version
 ```powershell
 git clone https://github.com/leonardo-devbr/gui-santos-barbearia.git
 cd gui-santos-barbearia
+git switch local
 ```
 
 ### 3. Instalar as dependências
@@ -108,7 +110,7 @@ O comando pode ser repetido para atualizar o nome ou a senha do mesmo e-mail. De
 
 Não existe cadastro público para a equipe. Cada ambiente local ou servidor precisa executar esse comando ao menos uma vez para criar o primeiro administrador. Depois, ele pode abrir **Acessos** no painel e criar uma conta vinculada para cada barbeiro.
 
-### 7. Configurar e-mails e lembretes (opcional localmente)
+### 7. Configurar e-mails, WhatsApp e lembretes (opcional localmente)
 
 O site funciona localmente sem um provedor de e-mail. Mantenha `SMTP_HOST` e `SMTP_FROM` vazios para que as mensagens sejam exibidas como prévias no terminal, sem envio real.
 
@@ -138,6 +140,14 @@ Copie o resultado para o `.env.local`. O segredo precisa ter pelo menos 32 carac
 CRON_SECRET="valor-aleatorio-gerado"
 ```
 
+Para testar os avisos do WhatsApp sem fazer envios reais, use:
+
+```env
+WHATSAPP_PROVIDER=console
+```
+
+O terminal exibirá uma prévia e a fila registrará o estado como prévia, nunca como entregue. Para conectar a API oficial da Meta, configurar o modelo aprovado, webhook e número de homologação, siga o [guia de WhatsApp](docs/whatsapp.md).
+
 ### Configurar o Google Maps
 
 Para exibir o mapa interativo da localização, habilite a [Maps Embed API](https://developers.google.com/maps/documentation/embed/get-started) em um projeto do Google Cloud e configure a chave no `.env.local`:
@@ -164,9 +174,9 @@ Com o site em execução e `CRON_SECRET` configurado, abra outro terminal na pas
 npm run notifications:process
 ```
 
-O comando cria um lembrete para cada atendimento do dia seguinte, evita duplicações e tenta novamente mensagens pendentes ou com falha, até o limite de três tentativas.
+O comando processa as filas de e-mail e WhatsApp, evita duplicações e tenta novamente somente falhas temporárias. O WhatsApp agenda lembretes de 24 horas e 2 horas e permite até cinco tentativas com espera progressiva.
 
-Em produção, configure o agendador da hospedagem para fazer uma requisição `POST` diária a `/api/notifications/process`, enviando o cabeçalho `Authorization: Bearer VALOR_DO_CRON_SECRET`. O segredo deve existir tanto no ambiente do site quanto no agendador.
+Em produção, configure o agendador da hospedagem para fazer uma requisição `POST` a cada cinco minutos para `/api/notifications/process`, enviando o cabeçalho `Authorization: Bearer VALOR_DO_CRON_SECRET`. O segredo deve existir tanto no ambiente do site quanto no agendador.
 
 ## Testes automatizados
 
@@ -199,6 +209,8 @@ Antes de publicar o site:
 - configure SMTP com TLS, um remetente do domínio e credenciais exclusivas da aplicação;
 - configure `TRUSTED_PROXY_IP_HEADER` com o cabeçalho de IP garantido pela hospedagem (`cf-connecting-ip`, `x-real-ip` ou `x-forwarded-for`); nunca confie em um cabeçalho que chega diretamente da internet;
 - gere um `CRON_SECRET` longo e diferente das demais senhas;
+- configure a WhatsApp Cloud API, o modelo aprovado e o webhook HTTPS conforme [docs/whatsapp.md](docs/whatsapp.md);
+- use `WHATSAPP_PROVIDER=meta` somente com `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET` e token de verificação armazenados como segredos;
 - mantenha `DEV_EXPOSE_PASSWORD_RESET_URL=false` e `DEV_EXPOSE_EMAIL_VERIFICATION_URL=false`, e remova `ADMIN_PASSWORD`, `MYSQL_SETUP_USER` e `MYSQL_SETUP_PASSWORD` depois das tarefas de configuração.
 
 Em produção, `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD` e `MYSQL_DATABASE` devem ser definidos explicitamente, a senha não pode ficar vazia e `MYSQL_USER` não pode ser `root`. A aplicação recusa uma conexão remota sem TLS; bancos locais em `localhost` ou `127.0.0.1` continuam funcionando com `MYSQL_SSL=false` durante o desenvolvimento.
@@ -208,7 +220,8 @@ Em produção, `MYSQL_HOST`, `MYSQL_USER`, `MYSQL_PASSWORD` e `MYSQL_DATABASE` d
 Depois que outro desenvolvedor enviar alterações ao repositório:
 
 ```powershell
-git pull origin main
+git switch local
+git pull origin local
 npm install
 npm run db:setup
 npm run dev
@@ -240,7 +253,7 @@ As senhas usam derivação `scrypt` e novas senhas exigem ao menos 12 caracteres
 
 Recuperação de senha, verificação de endereço, confirmação, remarcação, cancelamento e lembrete de agendamento possuem e-mails próprios. Sem SMTP, o desenvolvimento mostra uma prévia no terminal. Links só aparecem diretamente na tela local com as opções explícitas `DEV_EXPOSE_PASSWORD_RESET_URL` ou `DEV_EXPOSE_EMAIL_VERIFICATION_URL`; isso nunca ocorre em produção. Em produção, `APP_URL` com HTTPS e as credenciais SMTP são obrigatórios para a entrega real.
 
-As notificações de agendamento são registradas em uma fila no MySQL. Uma indisponibilidade do provedor de e-mail não desfaz o agendamento: a mensagem fica marcada como falha e o processador pode tentar novamente até três vezes.
+As notificações de agendamento são registradas em filas no MySQL. Uma indisponibilidade de SMTP ou da Meta não desfaz o agendamento. O WhatsApp atende cliente, barbeiro e administradores com consentimento, revalida o destinatário antes de enviar e invalida automaticamente avisos antigos após remarcação, cancelamento ou conclusão.
 O processador também elimina, em lotes, notificações concluídas ou abandonadas há mais de 90 dias, evitando manter indefinidamente destinatários e cópias do conteúdo enviado.
 
 A API rejeita origens incompatíveis em operações que alteram dados, limita o corpo JSON, aplica limites de tentativas em autenticação e agenda e envia cabeçalhos de segurança no navegador. Trocar o e-mail do cliente ou gerenciar acessos da equipe exige confirmar a senha atual do administrador.
@@ -264,7 +277,7 @@ Todas as requisições e respostas usam JSON. Em erros, a API responde com um st
 
 | Método | Rota | Corpo | Comportamento |
 | --- | --- | --- | --- |
-| `POST` | `/api/auth/register` | `{ "name", "phone", "email", "password" }` | Inicia o cadastro e envia um link de confirmação sem revelar se o e-mail já está em uso. |
+| `POST` | `/api/auth/register` | `{ "name", "phone", "email", "password", "whatsappOptIn" }` | Inicia o cadastro, registra o consentimento opcional e envia um link de confirmação sem revelar se o e-mail já está em uso. |
 | `POST` | `/api/auth/login` | `{ "email", "password" }` | Cria a sessão e envia um cookie seguro e `HttpOnly`. |
 | `POST` | `/api/auth/logout` | Sem corpo | Invalida a sessão e remove o cookie. |
 | `POST` | `/api/auth/forgot-password` | `{ "email" }` | Cria um token sem revelar se o e-mail existe; só devolve o link local com a opção explícita de desenvolvimento. |
@@ -300,9 +313,11 @@ A disponibilidade exibida no navegador é apenas informativa. Ao criar ou remarc
 
 | Método | Rota | Autorização | Comportamento |
 | --- | --- | --- | --- |
-| `POST` | `/api/notifications/process` | `Bearer CRON_SECRET` | Cria os lembretes do dia seguinte e processa a fila pendente, em lotes de até 50 mensagens. |
+| `POST` | `/api/notifications/process` | `Bearer CRON_SECRET` | Processa as filas pendentes de e-mail e WhatsApp, em lotes de até 50 mensagens. |
 
 Essa rota é destinada ao agendador do servidor e nunca deve ser chamada a partir do navegador do cliente. Repetir a execução não duplica os lembretes já criados.
+
+O webhook público da Meta usa `/api/webhooks/whatsapp`. A assinatura HMAC é obrigatória no `POST`; a confirmação inicial usa o token de verificação configurado no ambiente.
 
 ### Painel da equipe
 
@@ -322,7 +337,7 @@ Clientes e membros da equipe possuem contas, sessões, cookies e telas de login 
 | `PATCH` | `/api/admin/barbers/:id` | Dados do barbeiro | Edita ou ativa/desativa um barbeiro. |
 | `PATCH` | `/api/admin/business` | Dados do estabelecimento | Atualiza contato, endereço e localização. |
 | `PUT` | `/api/admin/business-hours` | `{ "hours": [...] }` | Atualiza os sete dias de funcionamento. |
-| `POST` | `/api/admin/users` | `{ "name", "email", "password", "role", "barberId", "currentPassword" }` | Cria um administrador ou acesso vinculado a um barbeiro. |
+| `POST` | `/api/admin/users` | `{ "name", "email", "password", "role", "barberId", "notificationPhone", "whatsappOptIn", "currentPassword" }` | Cria um administrador ou acesso vinculado a um barbeiro e configura os avisos. |
 | `PATCH` | `/api/admin/users/:id` | Dados da conta e `currentPassword` | Edita, redefine a senha, vincula ou suspende um acesso da equipe. |
 
 No navegador, o painel possui as seguintes áreas:
@@ -334,6 +349,7 @@ No navegador, o painel possui as seguintes áreas:
 - `/admin/barbeiros`: perfis e disponibilidade da equipe;
 - `/admin/configuracoes`: contato, endereço, mapa e horários de funcionamento;
 - `/admin/administradores`: acessos de administradores e barbeiros, disponível somente ao administrador.
+- `/admin/notificacoes`: auditoria dos avisos do WhatsApp e processamento manual de pendências, disponível somente ao administrador.
 
 Serviços e barbeiros são desativados, não apagados, preservando o histórico dos agendamentos. Horários e bloqueios são validados novamente pelo backend ao criar ou remarcar uma reserva. O painel também impede criar bloqueios, reduzir o expediente ou desativar um barbeiro quando a mudança conflita com agendamentos ativos. Os agendamentos usam os estados `confirmado`, `concluido` e `cancelado`; a conclusão só é liberada depois do início do atendimento. Cada barbeiro possui no máximo uma conta vinculada e não consegue consultar nem alterar a agenda de outro profissional. O administrador atual não pode desativar ou rebaixar a própria conta; trocar senha, papel ou vínculo invalida as sessões anteriores.
 
@@ -349,7 +365,8 @@ Serviços e barbeiros são desativados, não apagados, preservando o histórico 
   "birthDate": "1994-03-12",
   "preferredCut": "Degradê médio",
   "beardStyle": "Barba média",
-  "notes": "Prefere acabamento natural."
+  "notes": "Prefere acabamento natural.",
+  "whatsappOptIn": true
 }
 ```
 

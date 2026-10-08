@@ -58,7 +58,7 @@ Restrinja `GOOGLE_MAPS_EMBED_API_KEY` no Google Cloud à URL pública do serviç
 Crie um serviço **Combined** com:
 
 - repositório: `leonardo-devbr/gui-santos-barbearia`;
-- branch: `main`;
+- branch: `producao`;
 - build: **Dockerfile**;
 - contexto: raiz do repositório;
 - Dockerfile: `/Dockerfile`;
@@ -127,7 +127,7 @@ SEED_BARBER_ID=guilherme
 
 As senhas precisam ter de 12 a 128 caracteres, com pelo menos uma letra e um número. Execute uma vez e depois **remova todas as variáveis `SEED_*` e exclua ou desative esse job**. As senhas são gravadas somente como hash.
 
-## 7. E-mails e notificações
+## 7. E-mails, WhatsApp e notificações
 
 O cadastro público exige SMTP em produção. Até configurar um provedor, use apenas a conta de cliente criada pelo job de homologação.
 
@@ -142,13 +142,15 @@ SMTP_PASSWORD=
 SMTP_FROM=
 ```
 
+Para testar somente as prévias na homologação, configure `WHATSAPP_PROVIDER=console`. Para envio real, cadastre como segredos as variáveis `WHATSAPP_*` descritas em [whatsapp.md](whatsapp.md), use `WHATSAPP_PROVIDER=meta` e registre no painel da Meta o webhook público `https://endereco-gerado.code.run/api/webhooks/whatsapp`.
+
 Para processar lembretes, reutilize o job temporário das contas ou crie um dos jobs gratuitos com:
 
 ```text
 node scripts/process-notifications.mjs
 ```
 
-Esse job precisa somente de `APP_URL` e do mesmo `CRON_SECRET` usado pelo serviço. Agende uma execução diária no horário desejado.
+Esse job precisa somente de `APP_URL` e do mesmo `CRON_SECRET` usado pelo serviço. Agende uma execução a cada cinco minutos para atender também aos lembretes de 2 horas e às novas tentativas do WhatsApp.
 
 ## 8. Verificação
 
@@ -160,6 +162,8 @@ Depois do setup, confirme:
 4. as três contas conseguem entrar;
 5. um cliente consegue criar um agendamento;
 6. o barbeiro enxerga somente a própria agenda;
-7. o administrador enxerga todas as agendas.
+7. o administrador enxerga todas as agendas;
+8. a confirmação aparece em `/admin/notificacoes` como prévia ou aceita;
+9. no modo Meta, o webhook atualiza o estado para enviada, entregue ou lida.
 
-Os logs nunca devem mostrar valores de `MYSQL_PASSWORD`, `CRON_SECRET`, senhas de contas ou credenciais SMTP.
+Os logs nunca devem mostrar valores de `MYSQL_PASSWORD`, `CRON_SECRET`, senhas de contas, telefones completos, credenciais SMTP ou segredos `WHATSAPP_*`.
