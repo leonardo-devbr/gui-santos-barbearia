@@ -42,5 +42,17 @@ if (!response.ok) {
 }
 
 console.log(
-  `Notificações processadas: ${body.processed}; enviadas: ${body.sent}; falhas: ${body.failed}; lembretes criados: ${body.queued}; registros antigos removidos: ${body.purged}.`,
+  [
+    `E-mails: ${body.email?.processed ?? body.processed} processados,`,
+    `${body.email?.sent ?? body.sent} enviados,`,
+    `${body.email?.failed ?? body.failed} falhas,`,
+    `${body.email?.queued ?? body.queued} lembretes criados e`,
+    `${body.email?.purged ?? body.purged} antigos removidos.`,
+    `WhatsApp: ${body.whatsapp?.processed ?? 0} processados,`,
+    `${body.whatsapp?.accepted ?? 0} aceitos,`,
+    `${body.whatsapp?.previewed ?? 0} pré-visualizados,`,
+    `${body.whatsapp?.retryScheduled ?? 0} reagendados,`,
+    `${body.whatsapp?.failed ?? 0} falhas e`,
+    `${body.whatsapp?.purged ?? 0} antigos removidos.`,
+  ].join(' '),
 )

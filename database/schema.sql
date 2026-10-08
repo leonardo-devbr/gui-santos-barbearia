@@ -190,6 +190,7 @@ CREATE TABLE IF NOT EXISTS appointments (
   ) STORED,
   price DECIMAL(10, 2) UNSIGNED NOT NULL,
   duration_minutes SMALLINT UNSIGNED NOT NULL,
+  notification_revision INT UNSIGNED NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -263,6 +264,58 @@ CREATE TABLE IF NOT EXISTS email_notifications (
   CONSTRAINT email_notifications_customer_id_fk
     FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE,
   CONSTRAINT email_notifications_appointment_id_fk
+    FOREIGN KEY (appointment_id) REFERENCES appointments (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS whatsapp_notifications (
+  id CHAR(36) NOT NULL,
+  appointment_id CHAR(36) NULL,
+  appointment_revision INT UNSIGNED NOT NULL,
+  event ENUM(
+    'appointment_created',
+    'appointment_rescheduled',
+    'appointment_cancelled',
+    'reminder_24h',
+    'reminder_2h'
+  ) NOT NULL,
+  audience ENUM('customer', 'barber', 'admin') NOT NULL,
+  recipient_kind ENUM('customer', 'staff') NOT NULL,
+  recipient_id CHAR(36) NOT NULL,
+  recipient_phone VARCHAR(20) NOT NULL,
+  recipient_name VARCHAR(80) NOT NULL,
+  details_snapshot JSON NOT NULL,
+  status ENUM(
+    'pending',
+    'processing',
+    'previewed',
+    'accepted',
+    'sent',
+    'delivered',
+    'read',
+    'failed',
+    'skipped',
+    'superseded'
+  ) NOT NULL DEFAULT 'pending',
+  attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  scheduled_for DATETIME NOT NULL,
+  next_attempt_at DATETIME NOT NULL,
+  locked_at DATETIME NULL,
+  provider_message_id VARCHAR(512) NULL,
+  provider_status_at DATETIME NULL,
+  last_error VARCHAR(500) NULL,
+  dedupe_key VARCHAR(191) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY whatsapp_notifications_dedupe_unique (dedupe_key),
+  UNIQUE KEY whatsapp_notifications_provider_message_unique (provider_message_id),
+  KEY whatsapp_notifications_dispatch_index
+    (status, scheduled_for, next_attempt_at, attempts),
+  KEY whatsapp_notifications_appointment_index
+    (appointment_id, appointment_revision, event),
+  KEY whatsapp_notifications_recipient_index
+    (recipient_kind, recipient_id, created_at),
+  CONSTRAINT whatsapp_notifications_appointment_id_fk
     FOREIGN KEY (appointment_id) REFERENCES appointments (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 

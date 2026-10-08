@@ -2,6 +2,9 @@ import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { internalErrorResponse } from '@/lib/api'
 import { processAppointmentNotifications } from '@/lib/email-notifications'
+import { processWhatsAppNotifications } from '@/lib/whatsapp-notifications'
+
+export const runtime = 'nodejs'
 
 function hasValidAuthorization(request: Request) {
   const secret = process.env.CRON_SECRET?.trim()
@@ -21,8 +24,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await processAppointmentNotifications()
-    return NextResponse.json(result)
+    const [email, whatsapp] = await Promise.all([
+      processAppointmentNotifications(),
+      processWhatsAppNotifications(),
+    ])
+    return NextResponse.json({ ...email, email, whatsapp })
   } catch (error) {
     return internalErrorResponse(error)
   }

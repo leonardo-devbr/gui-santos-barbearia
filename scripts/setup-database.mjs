@@ -436,6 +436,21 @@ async function addWhatsappContactPreferences() {
   ])
 }
 
+async function addWhatsappNotificationQueue() {
+  const migrationName = '20261008_whatsapp_notification_queue'
+  if (await hasSchemaMigration(migrationName)) return
+
+  if (!(await hasAppointmentColumn('notification_revision'))) {
+    await databaseConnection.query(
+      'ALTER TABLE appointments ADD COLUMN notification_revision INT UNSIGNED NOT NULL DEFAULT 1 AFTER duration_minutes',
+    )
+  }
+
+  await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+    migrationName,
+  ])
+}
+
 async function updateDefaultBusinessLocation() {
   const migrationName = '20261005_update_default_business_location'
   if (await hasSchemaMigration(migrationName)) return
@@ -484,6 +499,7 @@ try {
   await addBarberProfilePhotos()
   await addBarberContactProfile()
   await addWhatsappContactPreferences()
+  await addWhatsappNotificationQueue()
   await updateDefaultBusinessLocation()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {
