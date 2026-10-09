@@ -792,6 +792,87 @@ describe('fila de avisos do WhatsApp com MySQL', () => {
     expect(countRows[0].total).toBe(9)
   })
 
+  it('completa lembretes de agendamentos existentes após o consentimento', async () => {
+    const customerId = await createCustomer('whatsapp-backfill')
+    const date = addDaysToIsoDate(getTodayInSaoPaulo(), 2)
+    const weekday = new Date(`${date}T12:00:00.000Z`).getUTCDay()
+    await applicationPool.execute<ResultSetHeader>(
+      `UPDATE business_hours
+       SET is_open = TRUE, open_time = '09:00:00', close_time = '21:00:00'
+       WHERE weekday = ?`,
+      [weekday],
+    )
+    const appointmentId = await appointmentModule.createAppointment(
+      customerId,
+      appointmentInput(date, '20:00'),
+    )
+    const [emptyRows] = await applicationPool.execute<CountRow[]>(
+      'SELECT COUNT(*) AS total FROM whatsapp_notifications WHERE appointment_id = ?',
+      [appointmentId],
+    )
+    expect(emptyRows[0].total).toBe(0)
+
+    await enableCustomerWhatsApp(customerId)
+    await enableStaffWhatsApp(staffUserId, '15999998888')
+
+    await expect(
+      whatsappNotificationModule.backfillUpcomingAppointmentWhatsAppReminders(),
+    ).resolves.toBe(4)
+    await expect(
+      whatsappNotificationModule.backfillUpcomingAppointmentWhatsAppReminders(),
+    ).resolves.toBe(0)
+
+    const [rows] = await applicationPool.execute<WhatsAppNotificationDatabaseRow[]>(
+      `SELECT id, appointment_revision, event, audience, recipient_kind, recipient_id,
+        status, attempts, scheduled_for, next_attempt_at
+       FROM whatsapp_notifications
+       WHERE appointment_id = ?
+       ORDER BY event, audience`,
+      [appointmentId],
+    )
+    expect(rows).toHaveLength(4)
+    expect(new Set(rows.map(({ event }) => event))).toEqual(
+      new Set(['reminder_24h', 'reminder_2h']),
+    )
+    expect(new Set(rows.map(({ audience }) => audience))).toEqual(
+      new Set(['customer', 'admin']),
+    )
+  })
+
+  it('não envia um lembrete que ficou atrasado na fila', async () => {
+    const customerId = await createCustomer('whatsapp-lembrete-atrasado')
+    await enableCustomerWhatsApp(customerId)
+    const { appointmentId } = await queueCreatedAppointment(customerId)
+    const [rows] = await applicationPool.execute<WhatsAppNotificationDatabaseRow[]>(
+      `SELECT id, appointment_revision, event, audience, recipient_kind, recipient_id,
+        status, attempts, scheduled_for, next_attempt_at
+       FROM whatsapp_notifications
+       WHERE appointment_id = ? AND event = 'reminder_24h' AND audience = 'customer'
+       LIMIT 1`,
+      [appointmentId],
+    )
+    expect(rows).toHaveLength(1)
+    await applicationPool.execute<ResultSetHeader>(
+      `UPDATE whatsapp_notifications
+       SET scheduled_for = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR),
+         next_attempt_at = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR)
+       WHERE id = ?`,
+      [rows[0].id],
+    )
+
+    await expect(
+      whatsappNotificationModule.deliverWhatsAppNotification(rows[0].id),
+    ).resolves.toBe('skipped')
+    const [updatedRows] = await applicationPool.execute<WhatsAppNotificationDatabaseRow[]>(
+      `SELECT id, appointment_revision, event, audience, recipient_kind, recipient_id,
+        status, attempts, scheduled_for, next_attempt_at
+       FROM whatsapp_notifications
+       WHERE id = ?`,
+      [rows[0].id],
+    )
+    expect(updatedRows[0]).toMatchObject({ status: 'skipped', attempts: 0 })
+  })
+
   it('substitui avisos antigos e notifica as duas agendas em uma remarcação real', async () => {
     const customerId = await createCustomer('whatsapp-remarcacao-real')
     await enableCustomerWhatsApp(customerId)

@@ -2,6 +2,7 @@ import 'server-only'
 
 import { randomUUID } from 'node:crypto'
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
+import { addDaysToIsoDate, getNowInSaoPaulo } from '@/lib/date'
 import { getPool, withTransaction } from '@/lib/db'
 import { formatDateLong, formatPrice } from '@/lib/format'
 import type {
@@ -75,6 +76,7 @@ interface NotificationRow extends RowDataPacket {
   details_snapshot: unknown
   status: WhatsAppNotificationStatus
   attempts: number
+  scheduled_for: string
 }
 
 interface AppointmentValidationRow extends RowDataPacket {
@@ -141,6 +143,7 @@ export interface QueueAppointmentWhatsAppResult {
 
 export interface WhatsAppProcessingResult {
   paused: boolean
+  remindersQueued: number
   recovered: number
   purged: number
   processed: number
@@ -167,8 +170,10 @@ const notificationRetentionDays = 90
 const notificationCleanupBatchSize = 1000
 const notificationBatchSize = 50
 const notificationConcurrency = 5
+const reminderBackfillBatchSize = 500
 const maximumAttempts = 5
 const processingLeaseMinutes = 15
+const staleReminderMinutes = 15
 
 function isDuplicateEntry(error: unknown) {
   return Boolean(
@@ -183,6 +188,10 @@ function getErrorMessage(error: unknown) {
 
 function toSqlDateTime(date: Date) {
   return date.toISOString().slice(0, 19).replace('T', ' ')
+}
+
+function fromSqlUtcDateTime(value: string) {
+  return new Date(`${value.replace(' ', 'T')}Z`)
 }
 
 function getZonedParts(date: Date) {
@@ -482,18 +491,10 @@ export async function supersedeAppointmentWhatsAppNotifications(
   return result.affectedRows
 }
 
-export async function queueAppointmentWhatsAppNotifications(
+async function getAppointmentQueueRow(
   connection: PoolConnection,
-  {
-    appointmentId,
-    event,
-    previousBarberId,
-  }: {
-    appointmentId: string
-    event: AppointmentMutationEvent
-    previousBarberId?: string
-  },
-): Promise<QueueAppointmentWhatsAppResult> {
+  appointmentId: string,
+) {
   const [rows] = await connection.execute<AppointmentQueueRow[]>(
     `SELECT
       appointments.id,
@@ -520,7 +521,57 @@ export async function queueAppointmentWhatsAppNotifications(
      FOR SHARE`,
     [appointmentId],
   )
-  const appointment = rows[0]
+  return rows[0] ?? null
+}
+
+async function queueAppointmentReminders(
+  connection: PoolConnection,
+  appointment: AppointmentQueueRow,
+  recipients: readonly QueueRecipient[],
+  now = new Date(),
+) {
+  const notificationIds: string[] = []
+  const appointmentInstant = getAppointmentInstantInSaoPaulo(
+    appointment.appointment_date,
+    appointment.appointment_time,
+  )
+  const reminders = [
+    { event: 'reminder_24h' as const, millisecondsBefore: 24 * 60 * 60 * 1000 },
+    { event: 'reminder_2h' as const, millisecondsBefore: 2 * 60 * 60 * 1000 },
+  ]
+
+  for (const reminder of reminders) {
+    const scheduledFor = new Date(appointmentInstant.getTime() - reminder.millisecondsBefore)
+    if (scheduledFor <= now) continue
+
+    for (const recipient of recipients) {
+      if (recipient.audience === 'barber' && !recipient.isCurrentBarber) continue
+      const id = await insertNotification(connection, {
+        appointment,
+        event: reminder.event,
+        recipient,
+        scheduledFor,
+      })
+      if (id) notificationIds.push(id)
+    }
+  }
+
+  return notificationIds
+}
+
+export async function queueAppointmentWhatsAppNotifications(
+  connection: PoolConnection,
+  {
+    appointmentId,
+    event,
+    previousBarberId,
+  }: {
+    appointmentId: string
+    event: AppointmentMutationEvent
+    previousBarberId?: string
+  },
+): Promise<QueueAppointmentWhatsAppResult> {
+  const appointment = await getAppointmentQueueRow(connection, appointmentId)
   if (!appointment) throw new WhatsAppQueueError('O agendamento não foi encontrado para os avisos.')
   if (appointment.status !== getExpectedAppointmentStatus(event)) {
     throw new WhatsAppQueueError('O status do agendamento não corresponde ao aviso solicitado.')
@@ -557,35 +608,15 @@ export async function queueAppointmentWhatsAppNotifications(
     }
   }
 
-  let remindersQueued = 0
+  let reminderNotificationIds: string[] = []
   if (event !== 'appointment_cancelled') {
-    const appointmentInstant = getAppointmentInstantInSaoPaulo(
-      appointment.appointment_date,
-      appointment.appointment_time,
+    reminderNotificationIds = await queueAppointmentReminders(
+      connection,
+      appointment,
+      recipients,
+      now,
     )
-    const reminders = [
-      { event: 'reminder_24h' as const, millisecondsBefore: 24 * 60 * 60 * 1000 },
-      { event: 'reminder_2h' as const, millisecondsBefore: 2 * 60 * 60 * 1000 },
-    ]
-
-    for (const reminder of reminders) {
-      const scheduledFor = new Date(appointmentInstant.getTime() - reminder.millisecondsBefore)
-      if (scheduledFor <= now) continue
-
-      for (const recipient of recipients) {
-        if (recipient.audience === 'barber' && !recipient.isCurrentBarber) continue
-        const id = await insertNotification(connection, {
-          appointment,
-          event: reminder.event,
-          recipient,
-          scheduledFor,
-        })
-        if (id) {
-          notificationIds.push(id)
-          remindersQueued += 1
-        }
-      }
-    }
+    notificationIds.push(...reminderNotificationIds)
   }
 
   return {
@@ -593,8 +624,20 @@ export async function queueAppointmentWhatsAppNotifications(
     notificationIds,
     immediateNotificationIds,
     eventQueued: immediateNotificationIds.length,
-    remindersQueued,
+    remindersQueued: reminderNotificationIds.length,
   }
+}
+
+export async function queueMissingAppointmentWhatsAppReminders(
+  connection: PoolConnection,
+  appointmentId: string,
+) {
+  const appointment = await getAppointmentQueueRow(connection, appointmentId)
+  if (!appointment || appointment.status !== 'confirmado') return 0
+
+  const recipients = await getQueueRecipients(connection, appointment)
+  const ids = await queueAppointmentReminders(connection, appointment, recipients)
+  return ids.length
 }
 
 async function finishWithoutDelivery(
@@ -649,7 +692,7 @@ async function claimWhatsAppNotification(
     const [notifications] = await connection.execute<NotificationRow[]>(
       `SELECT id, appointment_id, appointment_revision, event, audience, recipient_kind,
         recipient_id, target_barber_id, recipient_phone, recipient_name, details_snapshot,
-        status, attempts
+        status, attempts, scheduled_for
        FROM whatsapp_notifications
        WHERE id = ?
          AND appointment_id = ?
@@ -673,6 +716,20 @@ async function claimWhatsAppNotification(
         id,
         'skipped',
         'O agendamento foi alterado e este aviso ficou desatualizado.',
+      )
+    }
+
+    const scheduledFor = fromSqlUtcDateTime(notification.scheduled_for)
+    if (
+      notification.event.startsWith('reminder_') &&
+      (!Number.isFinite(scheduledFor.getTime()) ||
+        scheduledFor.getTime() < Date.now() - staleReminderMinutes * 60_000)
+    ) {
+      return finishWithoutDelivery(
+        connection,
+        id,
+        'skipped',
+        'O horário útil deste lembrete já passou.',
       )
     }
 
@@ -873,10 +930,43 @@ export async function processImmediateAppointmentWhatsAppNotifications(
   return processWhatsAppNotificationIds(notifications.map(({ id }) => id))
 }
 
+export async function backfillUpcomingAppointmentWhatsAppReminders() {
+  const now = getNowInSaoPaulo()
+  const finalDate = addDaysToIsoDate(now.date, 2)
+  const [appointments] = await getPool().execute<NotificationIdRow[]>(
+    `SELECT id
+     FROM appointments
+     WHERE status = 'confirmado'
+       AND appointment_date BETWEEN ? AND ?
+       AND (
+         appointment_date > ?
+         OR (appointment_date = ? AND appointment_time > ?)
+       )
+     ORDER BY appointment_date ASC, appointment_time ASC, id ASC
+     LIMIT ${reminderBackfillBatchSize}`,
+    [now.date, finalDate, now.date, now.date, `${now.time}:00`],
+  )
+
+  let queued = 0
+  for (const appointment of appointments) {
+    try {
+      queued += await withTransaction((connection) =>
+        queueMissingAppointmentWhatsAppReminders(connection, appointment.id),
+      )
+    } catch {
+      console.error(
+        `Não foi possível completar os lembretes do agendamento ${appointment.id}.`,
+      )
+    }
+  }
+  return queued
+}
+
 export async function processWhatsAppNotifications(): Promise<WhatsAppProcessingResult> {
   if (!getWhatsAppDispatchState().ready) {
     return {
       paused: true,
+      remindersQueued: 0,
       recovered: 0,
       purged: 0,
       processed: 0,
@@ -890,6 +980,7 @@ export async function processWhatsAppNotifications(): Promise<WhatsAppProcessing
   }
 
   const pool = getPool()
+  const remindersQueued = await backfillUpcomingAppointmentWhatsAppReminders()
 
   await pool.execute<ResultSetHeader>(
     `UPDATE whatsapp_notifications
@@ -931,6 +1022,7 @@ export async function processWhatsAppNotifications(): Promise<WhatsAppProcessing
 
   return {
     paused: false,
+    remindersQueued,
     recovered: recoveryResult.affectedRows,
     purged: cleanupResult.affectedRows,
     processed: outcomes.length,

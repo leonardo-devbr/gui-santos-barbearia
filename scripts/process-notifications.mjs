@@ -50,6 +50,7 @@ console.log(
     `${body.email?.purged ?? body.purged} antigos removidos.`,
     `WhatsApp: ${body.whatsapp?.processed ?? 0} processados,`,
     `${body.whatsapp?.paused ? 'processamento pausado,' : ''}`,
+    `${body.whatsapp?.remindersQueued ?? 0} lembretes novos,`,
     `${body.whatsapp?.accepted ?? 0} aceitos,`,
     `${body.whatsapp?.previewed ?? 0} pré-visualizados,`,
     `${body.whatsapp?.retryScheduled ?? 0} reagendados,`,
