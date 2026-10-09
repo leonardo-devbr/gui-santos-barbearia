@@ -1040,6 +1040,78 @@ describe('fila de avisos do WhatsApp com MySQL', () => {
     expect(updatedRows[0]).toMatchObject({ status: 'skipped', attempts: 0 })
   })
 
+  it('não envia dados da agenda depois que o acesso muda de barbeiro', async () => {
+    const customerId = await createCustomer('whatsapp-vinculo-barbeiro')
+    const barberStaffId = await createBarberStaff('guilherme')
+    await enableStaffWhatsApp(barberStaffId, '15988887777')
+    const date = findOpenDateAtLeast(8)
+    const appointmentId = await appointmentModule.createAppointment(
+      customerId,
+      appointmentInput(date, '14:00', 'guilherme'),
+    )
+    const [rows] = await applicationPool.execute<WhatsAppNotificationDatabaseRow[]>(
+      `SELECT id, appointment_revision, event, audience, recipient_kind, recipient_id,
+        status, attempts, scheduled_for, next_attempt_at
+       FROM whatsapp_notifications
+       WHERE appointment_id = ?
+         AND event = 'appointment_created'
+         AND audience = 'barber'
+       LIMIT 1`,
+      [appointmentId],
+    )
+    expect(rows).toHaveLength(1)
+
+    await applicationPool.execute<ResultSetHeader>(
+      "UPDATE staff_users SET barber_id = 'vitor' WHERE id = ?",
+      [barberStaffId],
+    )
+
+    await expect(
+      whatsappNotificationModule.deliverWhatsAppNotification(rows[0].id),
+    ).resolves.toBe('skipped')
+    const [updatedRows] = await applicationPool.execute<WhatsAppNotificationDatabaseRow[]>(
+      `SELECT id, appointment_revision, event, audience, recipient_kind, recipient_id,
+        status, attempts, scheduled_for, next_attempt_at
+       FROM whatsapp_notifications
+       WHERE id = ?`,
+      [rows[0].id],
+    )
+    expect(updatedRows[0]).toMatchObject({ status: 'skipped', attempts: 0 })
+  })
+
+  it('mantém o aviso pendente quando o provedor está desativado', async () => {
+    const customerId = await createCustomer('whatsapp-provedor-pausado')
+    await enableCustomerWhatsApp(customerId)
+    const date = findOpenDateAtLeast(8)
+    const appointmentId = await appointmentModule.createAppointment(
+      customerId,
+      appointmentInput(date, '14:00'),
+    )
+    const [rows] = await applicationPool.execute<WhatsAppNotificationDatabaseRow[]>(
+      `SELECT id, appointment_revision, event, audience, recipient_kind, recipient_id,
+        status, attempts, scheduled_for, next_attempt_at
+       FROM whatsapp_notifications
+       WHERE appointment_id = ?
+         AND event = 'appointment_created'
+         AND audience = 'customer'
+       LIMIT 1`,
+      [appointmentId],
+    )
+    process.env.WHATSAPP_PROVIDER = 'disabled'
+
+    await expect(
+      whatsappNotificationModule.deliverWhatsAppNotification(rows[0].id),
+    ).resolves.toBe('paused')
+    const [updatedRows] = await applicationPool.execute<WhatsAppNotificationDatabaseRow[]>(
+      `SELECT id, appointment_revision, event, audience, recipient_kind, recipient_id,
+        status, attempts, scheduled_for, next_attempt_at
+       FROM whatsapp_notifications
+       WHERE id = ?`,
+      [rows[0].id],
+    )
+    expect(updatedRows[0]).toMatchObject({ status: 'pending', attempts: 0 })
+  })
+
   it('reagenda somente falhas transitórias e recupera um processamento abandonado', async () => {
     const customerId = await createCustomer('whatsapp-retry')
     await enableCustomerWhatsApp(customerId)

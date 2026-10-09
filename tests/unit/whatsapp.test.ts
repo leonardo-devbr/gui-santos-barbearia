@@ -6,6 +6,7 @@ import {
   type WhatsAppRecipientAudience,
 } from '@/lib/whatsapp-templates'
 import {
+  getWhatsAppDispatchState,
   maskWhatsAppNumber,
   normalizeBrazilianWhatsAppNumber,
   sendAppointmentWhatsApp,
@@ -196,6 +197,24 @@ describe('provedor de WhatsApp', () => {
       if (originalValue === undefined) delete process.env[key]
       else process.env[key] = originalValue
     }
+  })
+
+  it('pausa a fila quando o provedor está desativado ou incompleto', () => {
+    expect(getWhatsAppDispatchState()).toEqual({
+      ready: false,
+      provider: 'disabled',
+      reason: 'disabled',
+    })
+
+    process.env.WHATSAPP_PROVIDER = 'meta'
+    expect(getWhatsAppDispatchState()).toEqual({
+      ready: false,
+      provider: 'meta',
+      reason: 'misconfigured',
+    })
+
+    process.env.WHATSAPP_PROVIDER = 'console'
+    expect(getWhatsAppDispatchState()).toEqual({ ready: true, provider: 'console' })
   })
 
   it.each([

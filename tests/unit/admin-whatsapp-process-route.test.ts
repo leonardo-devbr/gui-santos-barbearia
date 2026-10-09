@@ -111,4 +111,34 @@ describe('processamento manual dos avisos do WhatsApp', () => {
       result: { processed: 3, previewed: 3 },
     })
   })
+
+  it('informa sem descartar a fila quando o provedor está pausado', async () => {
+    authMock.mockResolvedValue({
+      id: 'admin-id',
+      name: 'Admin',
+      email: 'admin@example.com',
+      role: 'admin',
+      barberId: null,
+    })
+    processMock.mockResolvedValue({
+      paused: true,
+      recovered: 0,
+      purged: 0,
+      processed: 0,
+      previewed: 0,
+      accepted: 0,
+      skipped: 0,
+      retryScheduled: 0,
+      failed: 0,
+      superseded: 0,
+    })
+
+    const response = await POST(request())
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      message: 'O envio está pausado. Configure o provedor do WhatsApp para processar a fila.',
+      result: { paused: true, processed: 0 },
+    })
+  })
 })

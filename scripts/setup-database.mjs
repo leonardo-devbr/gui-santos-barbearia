@@ -182,6 +182,32 @@ async function hasBarberColumn(name) {
   return Boolean(rows[0])
 }
 
+async function hasWhatsappNotificationColumn(name) {
+  const [rows] = await databaseConnection.execute(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE()
+       AND table_name = 'whatsapp_notifications'
+       AND column_name = ?
+     LIMIT 1`,
+    [name],
+  )
+  return Boolean(rows[0])
+}
+
+async function hasWhatsappNotificationConstraint(name) {
+  const [rows] = await databaseConnection.execute(
+    `SELECT 1
+     FROM information_schema.table_constraints
+     WHERE constraint_schema = DATABASE()
+       AND table_name = 'whatsapp_notifications'
+       AND constraint_name = ?
+     LIMIT 1`,
+    [name],
+  )
+  return Boolean(rows[0])
+}
+
 async function hasSchemaMigration(name) {
   const [rows] = await databaseConnection.execute(
     'SELECT 1 FROM schema_migrations WHERE name = ? LIMIT 1',
@@ -451,6 +477,40 @@ async function addWhatsappNotificationQueue() {
   ])
 }
 
+async function bindWhatsappNotificationsToBarbers() {
+  const migrationName = '20261009_whatsapp_notification_barber_binding'
+  if (await hasSchemaMigration(migrationName)) return
+
+  if (!(await hasWhatsappNotificationColumn('target_barber_id'))) {
+    await databaseConnection.query(
+      'ALTER TABLE whatsapp_notifications ADD COLUMN target_barber_id VARCHAR(64) NULL AFTER recipient_id',
+    )
+  }
+
+  await databaseConnection.query(
+    `UPDATE whatsapp_notifications
+     SET status = 'skipped', locked_at = NULL,
+       last_error = 'Aviso antigo invalidado durante a atualização de segurança do vínculo do barbeiro.'
+     WHERE audience = 'barber' AND status IN ('pending', 'processing')`,
+  )
+
+  if (
+    !(await hasWhatsappNotificationConstraint(
+      'whatsapp_notifications_target_barber_id_fk',
+    ))
+  ) {
+    await databaseConnection.query(
+      `ALTER TABLE whatsapp_notifications
+       ADD CONSTRAINT whatsapp_notifications_target_barber_id_fk
+       FOREIGN KEY (target_barber_id) REFERENCES barbers (id) ON DELETE SET NULL`,
+    )
+  }
+
+  await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+    migrationName,
+  ])
+}
+
 async function updateDefaultBusinessLocation() {
   const migrationName = '20261005_update_default_business_location'
   if (await hasSchemaMigration(migrationName)) return
@@ -500,6 +560,7 @@ try {
   await addBarberContactProfile()
   await addWhatsappContactPreferences()
   await addWhatsappNotificationQueue()
+  await bindWhatsappNotificationsToBarbers()
   await updateDefaultBusinessLocation()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {

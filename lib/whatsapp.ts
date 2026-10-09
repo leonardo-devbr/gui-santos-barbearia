@@ -10,6 +10,10 @@ import {
 
 export type WhatsAppProvider = 'disabled' | 'console' | 'meta'
 
+export type WhatsAppDispatchState =
+  | { ready: true; provider: 'console' | 'meta' }
+  | { ready: false; provider: 'disabled' | 'meta'; reason: 'disabled' | 'misconfigured' }
+
 export interface WhatsAppDeliveryResult {
   accepted: boolean
   previewed: boolean
@@ -134,6 +138,21 @@ function getWhatsAppConfiguration(): WhatsAppConfiguration {
   const settings = readTemplateSettings()
   if (provider === 'console') return { provider, ...settings }
   return readMetaConfiguration(settings)
+}
+
+export function getWhatsAppDispatchState(): WhatsAppDispatchState {
+  try {
+    const configuration = getWhatsAppConfiguration()
+    if (configuration.provider === 'disabled') {
+      return { ready: false, provider: 'disabled', reason: 'disabled' }
+    }
+    return { ready: true, provider: configuration.provider }
+  } catch (error) {
+    if (error instanceof WhatsAppConfigurationError) {
+      return { ready: false, provider: 'meta', reason: 'misconfigured' }
+    }
+    throw error
+  }
 }
 
 export function normalizeBrazilianWhatsAppNumber(value: string) {

@@ -10,6 +10,7 @@ import type {
   WhatsAppRecipientAudience,
 } from '@/lib/whatsapp-templates'
 import {
+  getWhatsAppDispatchState,
   sendAppointmentWhatsApp,
   WhatsAppDeliveryError,
 } from '@/lib/whatsapp'
@@ -68,6 +69,7 @@ interface NotificationRow extends RowDataPacket {
   audience: WhatsAppRecipientAudience
   recipient_kind: WhatsAppRecipientKind
   recipient_id: string
+  target_barber_id: string | null
   recipient_phone: string
   recipient_name: string
   details_snapshot: unknown
@@ -108,6 +110,7 @@ interface QueueRecipient {
   audience: WhatsAppRecipientAudience
   kind: WhatsAppRecipientKind
   id: string
+  targetBarberId: string | null
   name: string
   phone: string
   isCurrentBarber: boolean
@@ -137,6 +140,7 @@ export interface QueueAppointmentWhatsAppResult {
 }
 
 export interface WhatsAppProcessingResult {
+  paused: boolean
   recovered: number
   purged: number
   processed: number
@@ -149,6 +153,7 @@ export interface WhatsAppProcessingResult {
 }
 
 export type WhatsAppDeliveryOutcome =
+  | 'paused'
   | 'previewed'
   | 'accepted'
   | 'skipped'
@@ -320,9 +325,9 @@ async function insertNotification(
     await connection.execute<ResultSetHeader>(
       `INSERT INTO whatsapp_notifications
         (id, appointment_id, appointment_revision, event, audience, recipient_kind,
-         recipient_id, recipient_phone, recipient_name, details_snapshot, scheduled_for,
-         next_attempt_at, dedupe_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         recipient_id, target_barber_id, recipient_phone, recipient_name, details_snapshot,
+         scheduled_for, next_attempt_at, dedupe_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         appointment.id,
@@ -331,6 +336,7 @@ async function insertNotification(
         recipient.audience,
         recipient.kind,
         recipient.id,
+        recipient.targetBarberId,
         recipient.phone,
         recipient.name,
         JSON.stringify(buildDetails(appointment, recipient.name)),
@@ -363,6 +369,7 @@ async function getQueueRecipients(
       audience: 'customer',
       kind: 'customer',
       id: appointment.customer_id,
+      targetBarberId: null,
       name: appointment.customer_name,
       phone: appointment.customer_phone,
       isCurrentBarber: false,
@@ -393,6 +400,7 @@ async function getQueueRecipients(
         audience: 'barber',
         kind: 'staff',
         id: barber.id,
+        targetBarberId: barber.barber_id,
         name: barber.name,
         phone: barber.notification_phone,
         isCurrentBarber: barber.barber_id === appointment.barber_id,
@@ -413,6 +421,7 @@ async function getQueueRecipients(
       audience: 'admin',
       kind: 'staff',
       id: admin.id,
+      targetBarberId: null,
       name: admin.name,
       phone: admin.notification_phone,
       isCurrentBarber: false,
@@ -639,7 +648,8 @@ async function claimWhatsAppNotification(
 
     const [notifications] = await connection.execute<NotificationRow[]>(
       `SELECT id, appointment_id, appointment_revision, event, audience, recipient_kind,
-        recipient_id, recipient_phone, recipient_name, details_snapshot, status, attempts
+        recipient_id, target_barber_id, recipient_phone, recipient_name, details_snapshot,
+        status, attempts
        FROM whatsapp_notifications
        WHERE id = ?
          AND appointment_id = ?
@@ -707,16 +717,21 @@ async function claimWhatsAppNotification(
       )
       const staff = staffUsers[0]
       const expectedRole = notification.audience === 'admin' ? 'admin' : 'barber'
+      const hasExpectedBarberBinding =
+        notification.audience !== 'barber' ||
+        (Boolean(notification.target_barber_id) &&
+          staff?.barber_id === notification.target_barber_id)
       const isCurrentReminderBarber =
         notification.audience !== 'barber' ||
         !notification.event.startsWith('reminder_') ||
-        staff?.barber_id === appointment.barber_id
+        notification.target_barber_id === appointment.barber_id
       if (
         !staff ||
         !Boolean(staff.is_active) ||
         !Boolean(staff.whatsapp_opt_in) ||
         !staff.notification_phone ||
         staff.role !== expectedRole ||
+        !hasExpectedBarberBinding ||
         !isCurrentReminderBarber
       ) {
         return finishWithoutDelivery(
@@ -766,10 +781,9 @@ async function updateDeliveredStatus(
   const [result] = await getPool().execute<ResultSetHeader>(
     `UPDATE whatsapp_notifications
      SET status = ?, locked_at = NULL, provider_message_id = ?,
-       provider_status_at = IF(? = 'accepted', UTC_TIMESTAMP(), provider_status_at),
-       last_error = NULL
+       provider_status_at = NULL, last_error = NULL
      WHERE id = ? AND status = 'processing'`,
-    [status, providerMessageId ?? null, status, notification.id],
+    [status, providerMessageId ?? null, notification.id],
   )
   return result.affectedRows === 1
 }
@@ -777,6 +791,8 @@ async function updateDeliveredStatus(
 export async function deliverWhatsAppNotification(
   id: string,
 ): Promise<WhatsAppDeliveryOutcome | null> {
+  if (!getWhatsAppDispatchState().ready) return 'paused'
+
   const claim = await claimWhatsAppNotification(id)
   if (!claim) return null
   if (claim.kind === 'finished') return claim.outcome
@@ -825,6 +841,9 @@ async function processInBatches(ids: string[]) {
 
 export async function processWhatsAppNotificationIds(ids: string[]) {
   const uniqueIds = [...new Set(ids)].slice(0, notificationBatchSize)
+  if (!getWhatsAppDispatchState().ready) {
+    return uniqueIds.length > 0 ? (['paused'] satisfies WhatsAppDeliveryOutcome[]) : []
+  }
   return processInBatches(uniqueIds)
 }
 
@@ -855,6 +874,21 @@ export async function processImmediateAppointmentWhatsAppNotifications(
 }
 
 export async function processWhatsAppNotifications(): Promise<WhatsAppProcessingResult> {
+  if (!getWhatsAppDispatchState().ready) {
+    return {
+      paused: true,
+      recovered: 0,
+      purged: 0,
+      processed: 0,
+      previewed: 0,
+      accepted: 0,
+      skipped: 0,
+      retryScheduled: 0,
+      failed: 0,
+      superseded: 0,
+    }
+  }
+
   const pool = getPool()
 
   await pool.execute<ResultSetHeader>(
@@ -896,6 +930,7 @@ export async function processWhatsAppNotifications(): Promise<WhatsAppProcessing
   const outcomes = await processInBatches(notifications.map(({ id }) => id))
 
   return {
+    paused: false,
     recovered: recoveryResult.affectedRows,
     purged: cleanupResult.affectedRows,
     processed: outcomes.length,

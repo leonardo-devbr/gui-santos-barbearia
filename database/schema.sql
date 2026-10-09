@@ -281,6 +281,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_notifications (
   audience ENUM('customer', 'barber', 'admin') NOT NULL,
   recipient_kind ENUM('customer', 'staff') NOT NULL,
   recipient_id CHAR(36) NOT NULL,
+  target_barber_id VARCHAR(64) NULL,
   recipient_phone VARCHAR(20) NOT NULL,
   recipient_name VARCHAR(80) NOT NULL,
   details_snapshot JSON NOT NULL,
@@ -315,8 +316,11 @@ CREATE TABLE IF NOT EXISTS whatsapp_notifications (
     (appointment_id, appointment_revision, event),
   KEY whatsapp_notifications_recipient_index
     (recipient_kind, recipient_id, created_at),
+  KEY whatsapp_notifications_target_barber_index (target_barber_id),
   CONSTRAINT whatsapp_notifications_appointment_id_fk
-    FOREIGN KEY (appointment_id) REFERENCES appointments (id) ON DELETE SET NULL
+    FOREIGN KEY (appointment_id) REFERENCES appointments (id) ON DELETE SET NULL,
+  CONSTRAINT whatsapp_notifications_target_barber_id_fk
+    FOREIGN KEY (target_barber_id) REFERENCES barbers (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 INSERT IGNORE INTO services (id, name, description, duration_minutes, price, category)

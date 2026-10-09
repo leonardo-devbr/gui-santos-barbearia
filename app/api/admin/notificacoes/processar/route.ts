@@ -35,8 +35,9 @@ export async function POST(request: Request) {
     if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
 
     const result = await processWhatsAppNotifications()
-    const message =
-      result.processed > 0
+    const message = result.paused
+      ? 'O envio está pausado. Configure o provedor do WhatsApp para processar a fila.'
+      : result.processed > 0
         ? `${result.processed} aviso(s) processado(s). A lista foi atualizada.`
         : 'Nenhum aviso pendente estava pronto para envio.'
 
