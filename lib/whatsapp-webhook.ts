@@ -1,8 +1,8 @@
 import 'server-only'
 
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
-import type { ResultSetHeader } from 'mysql2/promise'
-import { getPool } from '@/lib/db'
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
+import { withTransaction } from '@/lib/db'
 
 export const WHATSAPP_WEBHOOK_MAX_BODY_BYTES = 256 * 1024
 
@@ -22,6 +22,20 @@ export interface WhatsAppWebhookStatusEvent {
   status: WhatsAppWebhookStatus
   providerStatusAt: Date
   lastError: string | null
+}
+
+interface StoredWhatsAppWebhookStatusEvent {
+  event_key: string
+  provider_message_id: string
+  status: WhatsAppWebhookStatus
+  provider_status_at: string | Date
+  last_error: string | null
+}
+
+type StoredWhatsAppWebhookStatusEventRow = StoredWhatsAppWebhookStatusEvent & RowDataPacket
+
+interface WhatsAppNotificationMatchRow extends RowDataPacket {
+  id: string
 }
 
 export class WhatsAppWebhookConfigurationError extends Error {}
@@ -55,6 +69,31 @@ const updateStatusSql = `
         END
       )
     )
+`
+
+const selectPendingStatusEventsSql = `
+  SELECT status_events.event_key, status_events.provider_message_id, status_events.status,
+    status_events.provider_status_at, status_events.last_error
+  FROM whatsapp_webhook_status_events AS status_events
+  INNER JOIN whatsapp_notifications AS notifications
+    ON notifications.provider_message_id = status_events.provider_message_id
+  WHERE status_events.applied_at IS NULL
+  ORDER BY status_events.provider_status_at ASC, status_events.event_key ASC
+  LIMIT 100
+  FOR UPDATE
+`
+
+const selectPendingStatusEventsForMessageSql = `
+  SELECT status_events.event_key, status_events.provider_message_id, status_events.status,
+    status_events.provider_status_at, status_events.last_error
+  FROM whatsapp_webhook_status_events AS status_events
+  INNER JOIN whatsapp_notifications AS notifications
+    ON notifications.provider_message_id = status_events.provider_message_id
+  WHERE status_events.applied_at IS NULL
+    AND status_events.provider_message_id = ?
+  ORDER BY status_events.provider_status_at ASC, status_events.event_key ASC
+  LIMIT 100
+  FOR UPDATE
 `
 
 function readRequiredSecret(name: 'WHATSAPP_WEBHOOK_VERIFY_TOKEN' | 'WHATSAPP_APP_SECRET') {
@@ -281,26 +320,118 @@ export function extractWhatsAppWebhookStatusEvents(
   return events
 }
 
+function createStatusEventKey(event: WhatsAppWebhookStatusEvent) {
+  return createHash('sha256')
+    .update(event.providerMessageId, 'utf8')
+    .update('\u001f')
+    .update(event.status, 'utf8')
+    .update('\u001f')
+    .update(event.providerStatusAt.toISOString(), 'utf8')
+    .digest('hex')
+}
+
+async function applyStoredStatusEvent(
+  connection: PoolConnection,
+  event: StoredWhatsAppWebhookStatusEvent,
+  notificationAlreadyLocked = false,
+) {
+  if (!notificationAlreadyLocked) {
+    const [notifications] = await connection.execute<WhatsAppNotificationMatchRow[]>(
+      `SELECT id
+       FROM whatsapp_notifications
+       WHERE provider_message_id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [event.provider_message_id],
+    )
+    if (!notifications[0]) return 0
+  }
+
+  const [result] = await connection.execute<ResultSetHeader>(updateStatusSql, [
+    event.status,
+    event.provider_status_at,
+    event.last_error,
+    event.provider_message_id,
+    event.provider_status_at,
+    event.provider_status_at,
+    statusRanks[event.status],
+  ])
+
+  await connection.execute<ResultSetHeader>(
+    `UPDATE whatsapp_webhook_status_events AS status_events
+     SET status_events.applied_at = UTC_TIMESTAMP()
+     WHERE status_events.event_key = ?
+       AND status_events.applied_at IS NULL
+       AND EXISTS (
+         SELECT 1
+         FROM whatsapp_notifications AS notifications
+         WHERE notifications.provider_message_id = status_events.provider_message_id
+       )`,
+    [event.event_key],
+  )
+
+  return result.affectedRows
+}
+
+async function reconcileStoredStatusEvents(providerMessageId: string | null) {
+  return withTransaction(async (connection) => {
+    const [events] = await connection.execute<StoredWhatsAppWebhookStatusEventRow[]>(
+      providerMessageId === null
+        ? selectPendingStatusEventsSql
+        : selectPendingStatusEventsForMessageSql,
+      providerMessageId === null ? [] : [providerMessageId],
+    )
+    let updatedCount = 0
+
+    for (const event of events) {
+      updatedCount += await applyStoredStatusEvent(connection, event, true)
+    }
+
+    return updatedCount
+  })
+}
+
+export async function applyPendingWhatsAppWebhookEventsForMessage(
+  providerMessageId: string,
+) {
+  return reconcileStoredStatusEvents(providerMessageId)
+}
+
+export async function applyPendingWhatsAppWebhookStatusEvents() {
+  return reconcileStoredStatusEvents(null)
+}
+
 export async function applyWhatsAppWebhookStatusEvents(
   events: readonly WhatsAppWebhookStatusEvent[],
 ) {
   if (events.length === 0) return 0
 
-  const pool = getPool()
-  let updatedCount = 0
+  return withTransaction(async (connection) => {
+    let updatedCount = 0
 
-  for (const event of events) {
-    const [result] = await pool.execute<ResultSetHeader>(updateStatusSql, [
-      event.status,
-      event.providerStatusAt,
-      event.lastError,
-      event.providerMessageId,
-      event.providerStatusAt,
-      event.providerStatusAt,
-      statusRanks[event.status],
-    ])
-    if (result.affectedRows > 0) updatedCount += 1
-  }
+    for (const event of events) {
+      const eventKey = createStatusEventKey(event)
+      await connection.execute<ResultSetHeader>(
+        `INSERT IGNORE INTO whatsapp_webhook_status_events
+          (event_key, provider_message_id, status, provider_status_at, last_error)
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          eventKey,
+          event.providerMessageId,
+          event.status,
+          event.providerStatusAt,
+          event.lastError,
+        ],
+      )
+      updatedCount += await applyStoredStatusEvent(connection, {
+        event_key: eventKey,
+        provider_message_id: event.providerMessageId,
+        status: event.status,
+        provider_status_at: event.providerStatusAt,
+        last_error: event.lastError,
+      })
+    }
 
-  return updatedCount
+    return updatedCount
+  })
 }

@@ -15,6 +15,10 @@ import {
   sendAppointmentWhatsApp,
   WhatsAppDeliveryError,
 } from '@/lib/whatsapp'
+import {
+  applyPendingWhatsAppWebhookEventsForMessage,
+  applyPendingWhatsAppWebhookStatusEvents,
+} from '@/lib/whatsapp-webhook'
 
 type AppointmentMutationEvent = Extract<
   AppointmentWhatsAppEvent,
@@ -863,6 +867,15 @@ export async function deliverWhatsAppNotification(
     })
     const status = result.previewed ? 'previewed' : result.accepted ? 'accepted' : 'skipped'
     const updated = await updateDeliveredStatus(claim, status, result.messageId)
+    if (updated && status === 'accepted' && result.messageId) {
+      try {
+        await applyPendingWhatsAppWebhookEventsForMessage(result.messageId)
+      } catch {
+        console.error(
+          `Não foi possível reconciliar imediatamente o webhook da notificação ${claim.id}.`,
+        )
+      }
+    }
     return updated ? status : 'superseded'
   } catch (error) {
     const retryable = error instanceof WhatsAppDeliveryError && error.retryable
@@ -963,6 +976,8 @@ export async function backfillUpcomingAppointmentWhatsAppReminders() {
 }
 
 export async function processWhatsAppNotifications(): Promise<WhatsAppProcessingResult> {
+  await applyPendingWhatsAppWebhookStatusEvents()
+
   if (!getWhatsAppDispatchState().ready) {
     return {
       paused: true,
@@ -1005,6 +1020,12 @@ export async function processWhatsAppNotifications(): Promise<WhatsAppProcessing
      WHERE status NOT IN ('pending', 'processing')
        AND created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${notificationRetentionDays} DAY)
      ORDER BY created_at ASC
+     LIMIT ${notificationCleanupBatchSize}`,
+  )
+  await pool.execute<ResultSetHeader>(
+    `DELETE FROM whatsapp_webhook_status_events
+     WHERE received_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${notificationRetentionDays} DAY)
+     ORDER BY received_at ASC
      LIMIT ${notificationCleanupBatchSize}`,
   )
   const [notifications] = await pool.execute<NotificationIdRow[]>(

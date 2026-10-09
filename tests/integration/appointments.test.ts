@@ -110,6 +110,7 @@ let adminServiceModule: typeof import('@/lib/admin-services')
 let adminUserModule: typeof import('@/lib/admin-users')
 let authModule: typeof import('@/lib/auth')
 let whatsappNotificationModule: typeof import('@/lib/whatsapp-notifications')
+let whatsappWebhookModule: typeof import('@/lib/whatsapp-webhook')
 
 function restoreEnvironment() {
   for (const name of environmentKeys) {
@@ -289,6 +290,7 @@ beforeAll(async () => {
   adminUserModule = await import('@/lib/admin-users')
   authModule = await import('@/lib/auth')
   whatsappNotificationModule = await import('@/lib/whatsapp-notifications')
+  whatsappWebhookModule = await import('@/lib/whatsapp-webhook')
   applicationPool = databaseModule.getPool()
 })
 
@@ -300,6 +302,7 @@ beforeEach(async () => {
   delete process.env.WHATSAPP_PHONE_NUMBER_ID
   delete process.env.WHATSAPP_ACCESS_TOKEN
   for (const table of [
+    'whatsapp_webhook_status_events',
     'whatsapp_notifications',
     'email_notifications',
     'schedule_blocks',
@@ -666,6 +669,76 @@ describe('agendamentos com MySQL', () => {
 })
 
 describe('fila de avisos do WhatsApp com MySQL', () => {
+  it('preserva e reconcilia um webhook recebido antes de salvar o wamid', async () => {
+    const notificationId = randomUUID()
+    const providerMessageId = 'wamid.integration-race-12345678'
+    const providerStatusAt = new Date('2026-10-09T15:30:00.000Z')
+
+    await applicationPool.execute<ResultSetHeader>(
+      `INSERT INTO whatsapp_notifications
+        (id, appointment_id, appointment_revision, event, audience, recipient_kind,
+         recipient_id, target_barber_id, recipient_phone, recipient_name, details_snapshot,
+         status, scheduled_for, next_attempt_at, dedupe_key)
+       VALUES (?, NULL, 1, 'appointment_created', 'customer', 'customer',
+         ?, NULL, '5515999999999', 'Cliente Webhook', JSON_OBJECT(),
+         'processing', UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?)`,
+      [notificationId, randomUUID(), `webhook-race:${notificationId}`],
+    )
+
+    await expect(
+      whatsappWebhookModule.applyWhatsAppWebhookStatusEvents([
+        {
+          providerMessageId,
+          status: 'delivered',
+          providerStatusAt,
+          lastError: null,
+        },
+      ]),
+    ).resolves.toBe(0)
+
+    const [pendingEvents] = await applicationPool.execute<
+      Array<RowDataPacket & { applied_at: string | null }>
+    >(
+      `SELECT applied_at
+       FROM whatsapp_webhook_status_events
+       WHERE provider_message_id = ?`,
+      [providerMessageId],
+    )
+    expect(pendingEvents).toHaveLength(1)
+    expect(pendingEvents[0].applied_at).toBeNull()
+
+    await applicationPool.execute<ResultSetHeader>(
+      `UPDATE whatsapp_notifications
+       SET status = 'accepted', provider_message_id = ?
+       WHERE id = ?`,
+      [providerMessageId, notificationId],
+    )
+
+    await expect(
+      whatsappWebhookModule.applyPendingWhatsAppWebhookEventsForMessage(providerMessageId),
+    ).resolves.toBe(1)
+
+    const [notifications] = await applicationPool.execute<
+      Array<RowDataPacket & { status: string; provider_status_at: string | null }>
+    >(
+      `SELECT status, provider_status_at
+       FROM whatsapp_notifications
+       WHERE id = ?`,
+      [notificationId],
+    )
+    const [appliedEvents] = await applicationPool.execute<
+      Array<RowDataPacket & { applied_at: string | null }>
+    >(
+      `SELECT applied_at
+       FROM whatsapp_webhook_status_events
+       WHERE provider_message_id = ?`,
+      [providerMessageId],
+    )
+    expect(notifications[0].status).toBe('delivered')
+    expect(notifications[0].provider_status_at).toBe('2026-10-09 15:30:00')
+    expect(appliedEvents[0].applied_at).not.toBeNull()
+  })
+
   async function enableCustomerWhatsApp(customerId: string) {
     await applicationPool.execute<ResultSetHeader>(
       `UPDATE customers

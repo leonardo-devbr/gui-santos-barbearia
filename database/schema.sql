@@ -323,6 +323,21 @@ CREATE TABLE IF NOT EXISTS whatsapp_notifications (
     FOREIGN KEY (target_barber_id) REFERENCES barbers (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS whatsapp_webhook_status_events (
+  event_key CHAR(64) NOT NULL,
+  provider_message_id VARCHAR(512) NOT NULL,
+  status ENUM('sent', 'delivered', 'read', 'failed') NOT NULL,
+  provider_status_at DATETIME NOT NULL,
+  last_error VARCHAR(500) NULL,
+  received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  applied_at DATETIME NULL,
+  PRIMARY KEY (event_key),
+  KEY whatsapp_webhook_status_events_message_index
+    (provider_message_id, applied_at, provider_status_at),
+  KEY whatsapp_webhook_status_events_pending_index (applied_at, provider_status_at),
+  KEY whatsapp_webhook_status_events_cleanup_index (received_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 INSERT IGNORE INTO services (id, name, description, duration_minutes, price, category)
 VALUES
   ('corte', 'Corte', 'Degradê, social ou corte tradicional.', 45, 40.00, 'cortes'),

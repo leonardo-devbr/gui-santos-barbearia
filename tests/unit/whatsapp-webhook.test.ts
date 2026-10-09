@@ -1,18 +1,24 @@
 import { createHmac } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { executeMock, getPoolMock } = vi.hoisted(() => {
+const { executeMock, getPoolMock, withTransactionMock } = vi.hoisted(() => {
   const execute = vi.fn()
   return {
     executeMock: execute,
     getPoolMock: vi.fn(() => ({ execute })),
+    withTransactionMock: vi.fn(
+      async (work: (connection: { execute: typeof execute }) => Promise<unknown>) =>
+        work({ execute }),
+    ),
   }
 })
 
-vi.mock('@/lib/db', () => ({ getPool: getPoolMock }))
+vi.mock('@/lib/db', () => ({ getPool: getPoolMock, withTransaction: withTransactionMock }))
 
 import { GET, POST } from '@/app/api/webhooks/whatsapp/route'
 import {
+  applyPendingWhatsAppWebhookEventsForMessage,
+  applyPendingWhatsAppWebhookStatusEvents,
   extractWhatsAppWebhookStatusEvents,
   WHATSAPP_WEBHOOK_MAX_BODY_BYTES,
   WhatsAppWebhookPayloadError,
@@ -72,7 +78,12 @@ function signedPost(body: string) {
 describe('webhook oficial do WhatsApp', () => {
   beforeEach(() => {
     for (const key of environmentKeys) delete process.env[key]
-    executeMock.mockResolvedValue([{ affectedRows: 1 }, undefined])
+    executeMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id') && sql.includes('FROM whatsapp_notifications')) {
+        return [[{ id: 'notification-id' }], undefined]
+      }
+      return [{ affectedRows: 1 }, undefined]
+    })
   })
 
   afterEach(() => {
@@ -213,9 +224,24 @@ describe('webhook oficial do WhatsApp', () => {
     const response = await POST(signedPost(body))
 
     expect(response.status).toBe(200)
-    expect(executeMock).toHaveBeenCalledTimes(2)
+    expect(executeMock).toHaveBeenCalledTimes(8)
 
-    const [sql, deliveredParameters] = executeMock.mock.calls[0] as [string, unknown[]]
+    const [insertSql, insertParameters] = executeMock.mock.calls[0] as [string, unknown[]]
+    expect(insertSql).toContain('INSERT IGNORE INTO whatsapp_webhook_status_events')
+    expect(insertParameters[0]).toMatch(/^[a-f\d]{64}$/)
+    expect(insertParameters.slice(1)).toEqual([
+      'wamid.delivered-1234',
+      'delivered',
+      new Date(1_791_234_567_000),
+      null,
+    ])
+
+    const [lockSql, lockParameters] = executeMock.mock.calls[1] as [string, unknown[]]
+    expect(lockSql).toContain('FROM whatsapp_notifications')
+    expect(lockSql).toContain('FOR UPDATE')
+    expect(lockParameters).toEqual(['wamid.delivered-1234'])
+
+    const [sql, deliveredParameters] = executeMock.mock.calls[2] as [string, unknown[]]
     expect(sql).toContain('UPDATE whatsapp_notifications')
     expect(sql).toContain('provider_message_id = ?')
     expect(sql).toContain('provider_status_at < ?')
@@ -233,7 +259,7 @@ describe('webhook oficial do WhatsApp', () => {
       new Date(1_791_234_567_000),
       3,
     ])
-    expect(executeMock.mock.calls[1][1]).toEqual([
+    expect(executeMock.mock.calls[6][1]).toEqual([
       'read',
       new Date(1_791_234_567_000),
       null,
@@ -266,7 +292,7 @@ describe('webhook oficial do WhatsApp', () => {
     const response = await POST(signedPost(body))
 
     expect(response.status).toBe(200)
-    const parameters = executeMock.mock.calls[0][1] as unknown[]
+    const parameters = executeMock.mock.calls[2][1] as unknown[]
     expect(parameters[0]).toBe('failed')
     expect(parameters[2]).toContain('código 131047')
     expect(parameters[2]).toContain('[redigido]')
@@ -277,7 +303,9 @@ describe('webhook oficial do WhatsApp', () => {
 
   it('confirma com 200 mesmo quando o provider_message_id não existe localmente', async () => {
     process.env.WHATSAPP_APP_SECRET = appSecret
-    executeMock.mockResolvedValueOnce([{ affectedRows: 0 }, undefined])
+    executeMock
+      .mockResolvedValueOnce([{ affectedRows: 1 }, undefined])
+      .mockResolvedValueOnce([[], undefined])
     const body = JSON.stringify(
       statusPayload([
         { id: 'wamid.unknown-123456', status: 'sent', timestamp: '1791234567' },
@@ -287,7 +315,97 @@ describe('webhook oficial do WhatsApp', () => {
     const response = await POST(signedPost(body))
 
     expect(response.status).toBe(200)
-    expect(executeMock).toHaveBeenCalledOnce()
+    expect(executeMock).toHaveBeenCalledTimes(2)
+    expect(executeMock.mock.calls[0][0]).toContain(
+      'INSERT IGNORE INTO whatsapp_webhook_status_events',
+    )
+    expect(executeMock.mock.calls[1][0]).toContain('FOR UPDATE')
+  })
+
+  it('reaplica um status guardado quando o identificador da mensagem passa a existir', async () => {
+    const providerStatusAt = '2026-10-09 12:34:56'
+    executeMock
+      .mockResolvedValueOnce([
+        [
+          {
+            event_key: 'a'.repeat(64),
+            provider_message_id: 'wamid.race-12345678',
+            status: 'sent',
+            provider_status_at: providerStatusAt,
+            last_error: null,
+          },
+        ],
+        undefined,
+      ])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, undefined])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, undefined])
+
+    await expect(
+      applyPendingWhatsAppWebhookEventsForMessage('wamid.race-12345678'),
+    ).resolves.toBe(1)
+
+    expect(executeMock).toHaveBeenCalledTimes(3)
+    expect(executeMock.mock.calls[0][0]).toContain(
+      'FROM whatsapp_webhook_status_events AS status_events',
+    )
+    expect(executeMock.mock.calls[0][1]).toEqual([
+      'wamid.race-12345678',
+    ])
+    expect(executeMock.mock.calls[1][1]).toEqual([
+      'sent',
+      providerStatusAt,
+      null,
+      'wamid.race-12345678',
+      providerStatusAt,
+      providerStatusAt,
+      1,
+    ])
+    expect(executeMock.mock.calls[2][0]).toContain('SET status_events.applied_at')
+  })
+
+  it('marca como aplicado um evento antigo sem regredir o status atual', async () => {
+    executeMock
+      .mockResolvedValueOnce([
+        [
+          {
+            event_key: 'b'.repeat(64),
+            provider_message_id: 'wamid.stale-1234567',
+            status: 'sent',
+            provider_status_at: '2026-10-09 10:00:00',
+            last_error: null,
+          },
+        ],
+        undefined,
+      ])
+      .mockResolvedValueOnce([{ affectedRows: 0 }, undefined])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, undefined])
+
+    await expect(applyPendingWhatsAppWebhookStatusEvents()).resolves.toBe(0)
+
+    expect(executeMock.mock.calls[0][0]).not.toContain(
+      'status_events.provider_message_id = ?',
+    )
+    expect(executeMock.mock.calls[0][1]).toEqual([])
+    expect(executeMock.mock.calls[2][0]).toContain('SET status_events.applied_at')
+  })
+
+  it('gera a mesma chave idempotente ao receber novamente o mesmo evento', async () => {
+    process.env.WHATSAPP_APP_SECRET = appSecret
+    const body = JSON.stringify(
+      statusPayload([
+        { id: 'wamid.duplicate-12345', status: 'delivered', timestamp: '1791234567' },
+      ]),
+    )
+
+    expect((await POST(signedPost(body))).status).toBe(200)
+    const firstEventKey = executeMock.mock.calls[0][1][0]
+
+    executeMock.mockClear()
+    expect((await POST(signedPost(body))).status).toBe(200)
+    const repeatedEventKey = executeMock.mock.calls[0][1][0]
+
+    expect(repeatedEventKey).toBe(firstEventKey)
+    expect(String(repeatedEventKey)).toMatch(/^[a-f\d]{64}$/)
   })
 
   it('rejeita payloads com coleções além do limite de segurança', () => {
