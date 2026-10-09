@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import {
   CalendarDays,
   CalendarOff,
+  BellRing,
   LayoutDashboard,
   CircleUserRound,
   Scissors,
@@ -68,6 +69,13 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
             )}
             {isAdmin && (
               <>
+                <Link
+                  href="/admin/notificacoes"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <BellRing className="size-4" />
+                  Avisos
+                </Link>
                 <Link
                   href="/admin/servicos"
                   className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
