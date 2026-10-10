@@ -17,6 +17,9 @@ export function TimeSelect({
   required,
   disabled,
   ariaLabel,
+  ariaInvalid,
+  ariaDescribedBy,
+  stepMinutes = 15,
   className,
   onValueChange,
 }: {
@@ -29,12 +32,18 @@ export function TimeSelect({
   required?: boolean
   disabled?: boolean
   ariaLabel?: string
+  ariaInvalid?: boolean
+  ariaDescribedBy?: string
+  stepMinutes?: number
   className?: string
   onValueChange: (value: string) => void
 }) {
-  const availableOptions = min
-    ? timeOptions.filter((time) => (excludeMin ? time > min : time >= min))
-    : timeOptions
+  const availableOptions = timeOptions.filter((time) => {
+    const minutes = Number(time.slice(3))
+    const matchesStep = stepMinutes > 0 && minutes % stepMinutes === 0
+    const matchesMinimum = !min || (excludeMin ? time > min : time >= min)
+    return matchesStep && matchesMinimum
+  })
 
   return (
     <select
@@ -44,9 +53,11 @@ export function TimeSelect({
       required={required}
       disabled={disabled}
       aria-label={ariaLabel}
+      aria-invalid={ariaInvalid}
+      aria-describedby={ariaDescribedBy}
       onChange={(event) => onValueChange(event.target.value)}
       className={cn(
-        'h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-3 focus:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50',
+        'h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-3 focus:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20',
         className,
       )}
     >

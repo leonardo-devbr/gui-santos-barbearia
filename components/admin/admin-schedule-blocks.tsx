@@ -7,8 +7,15 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { TimeSelect } from '@/components/ui/time-select'
+import {
+  getApiMessage,
+  type AdminScheduleBlockFormErrors,
+  type AdminScheduleBlockFormField,
+  validateAdminScheduleBlockForm,
+} from '@/lib/admin-settings-form-validation'
 import { formatDateLong } from '@/lib/format'
 import type { Barber, ScheduleBlock } from '@/lib/types'
 
@@ -43,21 +50,44 @@ export function AdminScheduleBlocks({
   const [date, setDate] = useState(today)
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
-  const [formError, setFormError] = useState<string | null>(null)
+  const [errors, setErrors] = useState<AdminScheduleBlockFormErrors>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  function clearError(field: AdminScheduleBlockFormField) {
+    setErrors((current) => {
+      if (!current[field]) return current
+
+      const next = { ...current }
+      delete next[field]
+      return next
+    })
+    setSubmitError(null)
+  }
 
   async function createBlock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = event.currentTarget
     const data = new FormData(form)
+    const validation = validateAdminScheduleBlockForm({
+      barberId: String(data.get('barberId') ?? ''),
+      date,
+      fullDay,
+      startTime,
+      endTime,
+      reason: String(data.get('reason') ?? ''),
+      today,
+    })
 
-    if (!fullDay && (!startTime || !endTime || startTime >= endTime)) {
-      setFormError('O horário de término deve ser posterior ao horário de início.')
+    if (Object.keys(validation.errors).length > 0) {
+      setErrors(validation.errors)
+      setSubmitError('Revise os campos destacados para continuar.')
       return
     }
 
-    setFormError(null)
+    setErrors({})
+    setSubmitError(null)
     setIsSubmitting(true)
 
     try {
@@ -65,19 +95,14 @@ export function AdminScheduleBlocks({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({
-          barberId: data.get('barberId'),
-          date: data.get('date'),
-          fullDay,
-          startTime: data.get('startTime'),
-          endTime: data.get('endTime'),
-          reason: data.get('reason'),
-        }),
+        body: JSON.stringify(validation.data),
       })
       const result = (await response.json().catch(() => null)) as ApiResponse | null
 
       if (!response.ok || !result?.block) {
-        setFormError(result?.message ?? 'Não foi possível criar o bloqueio.')
+        setSubmitError(
+          getApiMessage(result, 'Não foi possível criar o bloqueio. Tente novamente.'),
+        )
         return
       }
 
@@ -87,9 +112,11 @@ export function AdminScheduleBlocks({
       setDate(today)
       setStartTime('')
       setEndTime('')
+      setErrors({})
+      setSubmitError(null)
       toast.success('Período bloqueado com sucesso.')
     } catch {
-      setFormError('Não foi possível conectar ao servidor. Tente novamente em instantes.')
+      setSubmitError('Não foi possível conectar ao servidor. Tente novamente em instantes.')
     } finally {
       setIsSubmitting(false)
     }
@@ -107,7 +134,7 @@ export function AdminScheduleBlocks({
       const result = (await response.json().catch(() => null)) as ApiResponse | null
 
       if (!response.ok) {
-        toast.error(result?.message ?? 'Não foi possível remover o bloqueio.')
+        toast.error(getApiMessage(result, 'Não foi possível remover o bloqueio. Tente novamente.'))
         return
       }
 
@@ -124,7 +151,12 @@ export function AdminScheduleBlocks({
     <div className="grid gap-8 xl:grid-cols-[minmax(300px,380px)_1fr] xl:items-start">
       <Card>
         <CardContent>
-          <form className="flex flex-col gap-5" onSubmit={createBlock}>
+          <form
+            className="flex flex-col gap-5"
+            onSubmit={createBlock}
+            noValidate
+            aria-busy={isSubmitting}
+          >
             <div>
               <h2 className="font-serif text-xl text-card-foreground">Novo bloqueio</h2>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -132,14 +164,19 @@ export function AdminScheduleBlocks({
               </p>
             </div>
 
-            {canSelectBarber ? (
-              <label className="flex flex-col gap-1.5 text-sm font-medium text-card-foreground">
-                Barbeiro
+            <FieldGroup>
+              {canSelectBarber ? (
+                <Field data-invalid={Boolean(errors.barberId)}>
+                  <FieldLabel htmlFor="block-barber">Barbeiro</FieldLabel>
                 <select
+                  id="block-barber"
                   name="barberId"
                   required
                   defaultValue="all"
-                  className="h-9 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/50"
+                    aria-invalid={Boolean(errors.barberId)}
+                    aria-describedby={errors.barberId ? 'block-barber-error' : undefined}
+                    onChange={() => clearError('barberId')}
+                    className="h-9 rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20"
                 >
                   <option value="all">Todos os barbeiros</option>
                   {barbers.map((barber) => (
@@ -148,25 +185,31 @@ export function AdminScheduleBlocks({
                     </option>
                   ))}
                 </select>
-              </label>
-            ) : (
-              <input name="barberId" type="hidden" value={currentBarberId ?? ''} />
-            )}
+                  <FieldError id="block-barber-error">{errors.barberId}</FieldError>
+                </Field>
+              ) : (
+                <input name="barberId" type="hidden" value={currentBarberId ?? ''} />
+              )}
 
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-card-foreground">
-              Data
-              <DatePicker
-                name="date"
-                value={date}
-                min={today}
-                onValueChange={(value) => {
-                  setDate(value)
-                  setFormError(null)
-                }}
-                dialogTitle="Escolha o dia do bloqueio"
-                className="w-full"
-              />
-            </label>
+              <Field data-invalid={Boolean(errors.date)}>
+                <FieldLabel htmlFor="block-date">Data</FieldLabel>
+                <DatePicker
+                  id="block-date"
+                  name="date"
+                  value={date}
+                  min={today}
+                  ariaInvalid={Boolean(errors.date)}
+                  ariaDescribedBy={errors.date ? 'block-date-error' : undefined}
+                  onValueChange={(value) => {
+                    setDate(value)
+                    clearError('date')
+                  }}
+                  dialogTitle="Escolha o dia do bloqueio"
+                  className="w-full"
+                />
+                <FieldError id="block-date-error">{errors.date}</FieldError>
+              </Field>
+            </FieldGroup>
 
             <label className="flex items-center gap-2 text-sm font-medium text-card-foreground">
               <input
@@ -174,7 +217,17 @@ export function AdminScheduleBlocks({
                 checked={fullDay}
                 onChange={(event) => {
                   setFullDay(event.target.checked)
-                  setFormError(null)
+                  if (event.target.checked) {
+                    setStartTime('')
+                    setEndTime('')
+                    setErrors((current) => {
+                      const next = { ...current }
+                      delete next.startTime
+                      delete next.endTime
+                      return next
+                    })
+                  }
+                  setSubmitError(null)
                 }}
                 className="size-4 accent-primary"
               />
@@ -183,57 +236,71 @@ export function AdminScheduleBlocks({
 
             {!fullDay && (
               <div className="grid grid-cols-2 gap-3">
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-card-foreground">
-                  Início
+                <Field data-invalid={Boolean(errors.startTime)}>
+                  <FieldLabel htmlFor="block-start-time">Início</FieldLabel>
                   <TimeSelect
+                    id="block-start-time"
                     name="startTime"
                     value={startTime}
                     required
+                    ariaInvalid={Boolean(errors.startTime)}
+                    ariaDescribedBy={errors.startTime ? 'block-start-time-error' : undefined}
                     placeholder="Selecione o início"
                     onValueChange={(value) => {
                       setStartTime(value)
                       if (endTime && value >= endTime) setEndTime('')
-                      setFormError(null)
+                      clearError('startTime')
+                      if (errors.endTime) clearError('endTime')
                     }}
                   />
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-card-foreground">
-                  Fim
+                  <FieldError id="block-start-time-error">{errors.startTime}</FieldError>
+                </Field>
+                <Field data-invalid={Boolean(errors.endTime)}>
+                  <FieldLabel htmlFor="block-end-time">Fim</FieldLabel>
                   <TimeSelect
+                    id="block-end-time"
                     name="endTime"
                     value={endTime}
                     min={startTime || undefined}
                     excludeMin
                     required
                     disabled={!startTime}
+                    ariaInvalid={Boolean(errors.endTime)}
+                    ariaDescribedBy={errors.endTime ? 'block-end-time-error' : undefined}
                     placeholder={startTime ? 'Selecione o término' : 'Escolha o início primeiro'}
                     onValueChange={(value) => {
                       setEndTime(value)
-                      setFormError(null)
+                      clearError('endTime')
                     }}
                   />
-                </label>
+                  <FieldError id="block-end-time-error">{errors.endTime}</FieldError>
+                </Field>
               </div>
             )}
 
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-card-foreground">
-              Motivo
+            <Field data-invalid={Boolean(errors.reason)}>
+              <FieldLabel htmlFor="block-reason">Motivo</FieldLabel>
               <Input
+                id="block-reason"
                 name="reason"
                 type="text"
                 minLength={3}
                 maxLength={160}
                 placeholder="Ex.: feriado municipal"
+                aria-invalid={Boolean(errors.reason)}
+                aria-describedby={errors.reason ? 'block-reason-error' : undefined}
+                onValueChange={() => clearError('reason')}
                 required
               />
-            </label>
+              <FieldError id="block-reason-error">{errors.reason}</FieldError>
+            </Field>
 
-            {formError && (
+            {submitError && (
               <p
                 role="alert"
                 className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
               >
-                {formError}
+                {submitError}
               </p>
             )}
 
