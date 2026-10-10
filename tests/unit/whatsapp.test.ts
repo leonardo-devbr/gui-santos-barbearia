@@ -302,6 +302,10 @@ describe('provedor de WhatsApp', () => {
       event: 'appointment_created',
       audience: 'customer',
       details,
+      correlation: {
+        notificationId: '00000000-0000-4000-8000-000000000789',
+        attempt: 2,
+      },
     })
 
     expect(result).toMatchObject({
@@ -333,6 +337,7 @@ describe('provedor de WhatsApp', () => {
       recipient_type: 'individual',
       to: '5511999999999',
       type: 'template',
+      biz_opaque_callback_data: 'wn1:00000000-0000-4000-8000-000000000789:2',
       template: {
         name: 'appointment_notification',
         language: { code: 'pt_BR' },
@@ -343,45 +348,80 @@ describe('provedor de WhatsApp', () => {
   })
 
   it.each([
-    [429, true],
-    [500, true],
-    [503, true],
-    [400, false],
-    [401, false],
-    [403, false],
-  ])('classifica a resposta HTTP %i com retryable=%s', async (status, retryable) => {
-    configureMeta()
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            error: {
-              message: 'detalhe externo que não deve ser propagado',
-              code: 131000,
-            },
-          }),
-          { status, headers: { 'Content-Type': 'application/json' } },
+    [429, true, false],
+    [500, true, true],
+    [503, true, true],
+    [400, false, false],
+    [401, false, false],
+    [403, false, false],
+  ])(
+    'classifica a resposta HTTP %i com retryable=%s e deliveryUnknown=%s',
+    async (status, retryable, deliveryUnknown) => {
+      configureMeta()
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              error: {
+                message: 'detalhe externo que não deve ser propagado',
+              code: 131009,
+              },
+            }),
+            { status, headers: { 'Content-Type': 'application/json' } },
+          ),
         ),
-      ),
-    )
+      )
 
-    try {
-      await sendAppointmentWhatsApp({
-        to: '11999999999',
-        event: 'appointment_created',
-        audience: 'customer',
-        details,
+      try {
+        await sendAppointmentWhatsApp({
+          to: '11999999999',
+          event: 'appointment_created',
+          audience: 'customer',
+          details,
+        })
+        throw new Error('Era esperado um erro de entrega.')
+      } catch (error) {
+        expect(error).toBeInstanceOf(WhatsAppDeliveryError)
+        expect((error as WhatsAppDeliveryError).retryable).toBe(retryable)
+        expect((error as WhatsAppDeliveryError).deliveryUnknown).toBe(deliveryUnknown)
+        expect((error as WhatsAppDeliveryError).statusCode).toBe(status)
+        expect((error as WhatsAppDeliveryError).providerCode).toBe(131009)
+        expect((error as Error).message).not.toContain('detalhe externo')
+      }
+    },
+  )
+
+  it.each([130429, 131000, 131016, 131056])(
+    'repete o erro temporário da Meta %i mesmo quando o HTTP é 400',
+    async (providerCode) => {
+      configureMeta()
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          Response.json(
+            { error: { code: providerCode, message: 'mensagem externa' } },
+            { status: 400, headers: { 'Retry-After': '120' } },
+          ),
+        ),
+      )
+
+      await expect(
+        sendAppointmentWhatsApp({
+          to: '11999999999',
+          event: 'appointment_created',
+          audience: 'customer',
+          details,
+        }),
+      ).rejects.toMatchObject({
+        retryable: true,
+        deliveryUnknown: false,
+        retryAfterSeconds: 120,
+        statusCode: 400,
+        providerCode,
       })
-      throw new Error('Era esperado um erro de entrega.')
-    } catch (error) {
-      expect(error).toBeInstanceOf(WhatsAppDeliveryError)
-      expect((error as WhatsAppDeliveryError).retryable).toBe(retryable)
-      expect((error as WhatsAppDeliveryError).statusCode).toBe(status)
-      expect((error as WhatsAppDeliveryError).providerCode).toBe(131000)
-      expect((error as Error).message).not.toContain('detalhe externo')
-    }
-  })
+    },
+  )
 
   it('trata timeout como falha temporária sem propagar dados do erro externo', async () => {
     configureMeta()
@@ -402,6 +442,7 @@ describe('provedor de WhatsApp', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(WhatsAppDeliveryError)
       expect((error as WhatsAppDeliveryError).retryable).toBe(true)
+      expect((error as WhatsAppDeliveryError).deliveryUnknown).toBe(true)
       expect((error as Error).message).toBe('O envio pelo WhatsApp excedeu o tempo limite.')
       expect((error as Error).message).not.toContain('token-meta-de-teste')
       expect((error as Error).message).not.toContain('5511999999999')
@@ -422,6 +463,7 @@ describe('provedor de WhatsApp', () => {
     ).rejects.toMatchObject({
       message: 'O provedor do WhatsApp retornou uma resposta inválida.',
       retryable: true,
+      deliveryUnknown: true,
       statusCode: 200,
     })
   })

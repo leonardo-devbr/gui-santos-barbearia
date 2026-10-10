@@ -3,6 +3,7 @@ import 'server-only'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { withTransaction } from '@/lib/db'
+import { parseWhatsAppNotificationCallbackData } from '@/lib/whatsapp-correlation'
 
 export const WHATSAPP_WEBHOOK_MAX_BODY_BYTES = 256 * 1024
 
@@ -19,6 +20,8 @@ export type WhatsAppWebhookStatus = 'sent' | 'delivered' | 'read' | 'failed'
 
 export interface WhatsAppWebhookStatusEvent {
   providerMessageId: string
+  notificationId: string | null
+  notificationAttempt: number | null
   status: WhatsAppWebhookStatus
   providerStatusAt: Date
   lastError: string | null
@@ -27,6 +30,8 @@ export interface WhatsAppWebhookStatusEvent {
 interface StoredWhatsAppWebhookStatusEvent {
   event_key: string
   provider_message_id: string
+  notification_id: string | null
+  notification_attempt: number | null
   status: WhatsAppWebhookStatus
   provider_status_at: string | Date
   last_error: string | null
@@ -36,6 +41,8 @@ type StoredWhatsAppWebhookStatusEventRow = StoredWhatsAppWebhookStatusEvent & Ro
 
 interface WhatsAppNotificationMatchRow extends RowDataPacket {
   id: string
+  attempts: number
+  provider_message_id: string | null
 }
 
 export class WhatsAppWebhookConfigurationError extends Error {}
@@ -51,15 +58,26 @@ const statusRanks: Record<'accepted' | WhatsAppWebhookStatus, number> = {
 }
 
 const updateStatusSql = `
-  UPDATE whatsapp_notifications
-  SET status = ?, provider_status_at = ?, last_error = ?
-  WHERE provider_message_id = ?
+  UPDATE whatsapp_notifications AS notifications
+  INNER JOIN whatsapp_webhook_status_events AS status_events
+    ON status_events.event_key = ? AND status_events.applied_at IS NULL
+  SET notifications.status = ?, notifications.provider_status_at = ?,
+    notifications.last_error = ?,
+    notifications.provider_message_id = COALESCE(notifications.provider_message_id, ?),
+    notifications.locked_at = NULL
+  WHERE notifications.id = ?
     AND (
-      provider_status_at IS NULL
-      OR provider_status_at < ?
+      notifications.provider_status_at IS NULL
+      OR ? > CASE notifications.status
+        WHEN 'accepted' THEN 0
+        WHEN 'sent' THEN 1
+        WHEN 'failed' THEN 2
+        WHEN 'delivered' THEN 3
+        WHEN 'read' THEN 4
+        ELSE -1
+      END
       OR (
-        provider_status_at = ?
-        AND ? >= CASE status
+        ? = CASE notifications.status
           WHEN 'accepted' THEN 0
           WHEN 'sent' THEN 1
           WHEN 'failed' THEN 2
@@ -67,30 +85,51 @@ const updateStatusSql = `
           WHEN 'read' THEN 4
           ELSE -1
         END
+        AND notifications.provider_status_at <= ?
       )
     )
 `
 
 const selectPendingStatusEventsSql = `
-  SELECT status_events.event_key, status_events.provider_message_id, status_events.status,
-    status_events.provider_status_at, status_events.last_error
+  SELECT status_events.event_key, status_events.provider_message_id,
+    status_events.notification_id, status_events.notification_attempt,
+    status_events.status, status_events.provider_status_at, status_events.last_error
   FROM whatsapp_webhook_status_events AS status_events
-  INNER JOIN whatsapp_notifications AS notifications
-    ON notifications.provider_message_id = status_events.provider_message_id
   WHERE status_events.applied_at IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM whatsapp_notifications AS notifications
+      WHERE notifications.provider_message_id = status_events.provider_message_id
+        OR (
+          status_events.notification_id IS NOT NULL
+          AND status_events.notification_attempt IS NOT NULL
+          AND notifications.id = status_events.notification_id
+          AND notifications.attempts >= status_events.notification_attempt
+        )
+    )
   ORDER BY status_events.provider_status_at ASC, status_events.event_key ASC
   LIMIT 100
   FOR UPDATE
 `
 
 const selectPendingStatusEventsForMessageSql = `
-  SELECT status_events.event_key, status_events.provider_message_id, status_events.status,
-    status_events.provider_status_at, status_events.last_error
+  SELECT status_events.event_key, status_events.provider_message_id,
+    status_events.notification_id, status_events.notification_attempt,
+    status_events.status, status_events.provider_status_at, status_events.last_error
   FROM whatsapp_webhook_status_events AS status_events
-  INNER JOIN whatsapp_notifications AS notifications
-    ON notifications.provider_message_id = status_events.provider_message_id
   WHERE status_events.applied_at IS NULL
     AND status_events.provider_message_id = ?
+    AND EXISTS (
+      SELECT 1
+      FROM whatsapp_notifications AS notifications
+      WHERE notifications.provider_message_id = status_events.provider_message_id
+        OR (
+          status_events.notification_id IS NOT NULL
+          AND status_events.notification_attempt IS NOT NULL
+          AND notifications.id = status_events.notification_id
+          AND notifications.attempts >= status_events.notification_attempt
+        )
+    )
   ORDER BY status_events.provider_status_at ASC, status_events.event_key ASC
   LIMIT 100
   FOR UPDATE
@@ -266,9 +305,12 @@ function parseStatusEvent(value: unknown): WhatsAppWebhookStatusEvent | undefine
 
   const providerStatusAt = parseUnixTimestamp(value.timestamp)
   if (!providerStatusAt) return undefined
+  const correlation = parseWhatsAppNotificationCallbackData(value.biz_opaque_callback_data)
 
   return {
     providerMessageId: value.id,
+    notificationId: correlation?.notificationId ?? null,
+    notificationAttempt: correlation?.attempt ?? null,
     status: value.status,
     providerStatusAt,
     lastError: value.status === 'failed' ? getSanitizedLastError(value) : null,
@@ -333,40 +375,62 @@ function createStatusEventKey(event: WhatsAppWebhookStatusEvent) {
 async function applyStoredStatusEvent(
   connection: PoolConnection,
   event: StoredWhatsAppWebhookStatusEvent,
-  notificationAlreadyLocked = false,
 ) {
-  if (!notificationAlreadyLocked) {
-    const [notifications] = await connection.execute<WhatsAppNotificationMatchRow[]>(
-      `SELECT id
+  let [notifications] = await connection.execute<WhatsAppNotificationMatchRow[]>(
+    `SELECT id, attempts, provider_message_id
+     FROM whatsapp_notifications
+     WHERE provider_message_id = ?
+     LIMIT 1
+     FOR UPDATE`,
+    [event.provider_message_id],
+  )
+  if (!notifications[0] && event.notification_id && event.notification_attempt) {
+    const [correlatedNotifications] = await connection.execute<WhatsAppNotificationMatchRow[]>(
+      `SELECT id, attempts, provider_message_id
        FROM whatsapp_notifications
-       WHERE provider_message_id = ?
+       WHERE id = ? AND attempts >= ?
        LIMIT 1
        FOR UPDATE`,
-      [event.provider_message_id],
+      [event.notification_id, event.notification_attempt],
     )
-    if (!notifications[0]) return 0
+    notifications = correlatedNotifications
+  }
+  const notification = notifications[0]
+  if (!notification) return 0
+
+  const obsoleteFailedAttempt =
+    event.status === 'failed' &&
+    event.notification_attempt !== null &&
+    event.notification_attempt < notification.attempts &&
+    notification.provider_message_id !== event.provider_message_id
+
+  if (obsoleteFailedAttempt) {
+    await connection.execute<ResultSetHeader>(
+      `UPDATE whatsapp_webhook_status_events
+       SET applied_at = UTC_TIMESTAMP()
+       WHERE event_key = ? AND applied_at IS NULL`,
+      [event.event_key],
+    )
+    return 0
   }
 
   const [result] = await connection.execute<ResultSetHeader>(updateStatusSql, [
+    event.event_key,
     event.status,
     event.provider_status_at,
     event.last_error,
     event.provider_message_id,
-    event.provider_status_at,
-    event.provider_status_at,
+    notification.id,
     statusRanks[event.status],
+    statusRanks[event.status],
+    event.provider_status_at,
   ])
 
   await connection.execute<ResultSetHeader>(
     `UPDATE whatsapp_webhook_status_events AS status_events
      SET status_events.applied_at = UTC_TIMESTAMP()
      WHERE status_events.event_key = ?
-       AND status_events.applied_at IS NULL
-       AND EXISTS (
-         SELECT 1
-         FROM whatsapp_notifications AS notifications
-         WHERE notifications.provider_message_id = status_events.provider_message_id
-       )`,
+       AND status_events.applied_at IS NULL`,
     [event.event_key],
   )
 
@@ -384,7 +448,7 @@ async function reconcileStoredStatusEvents(providerMessageId: string | null) {
     let updatedCount = 0
 
     for (const event of events) {
-      updatedCount += await applyStoredStatusEvent(connection, event, true)
+      updatedCount += await applyStoredStatusEvent(connection, event)
     }
 
     return updatedCount
@@ -413,11 +477,14 @@ export async function applyWhatsAppWebhookStatusEvents(
       const eventKey = createStatusEventKey(event)
       await connection.execute<ResultSetHeader>(
         `INSERT IGNORE INTO whatsapp_webhook_status_events
-          (event_key, provider_message_id, status, provider_status_at, last_error)
-         VALUES (?, ?, ?, ?, ?)`,
+          (event_key, provider_message_id, notification_id, notification_attempt,
+           status, provider_status_at, last_error)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           eventKey,
           event.providerMessageId,
+          event.notificationId,
+          event.notificationAttempt,
           event.status,
           event.providerStatusAt,
           event.lastError,
@@ -426,6 +493,8 @@ export async function applyWhatsAppWebhookStatusEvents(
       updatedCount += await applyStoredStatusEvent(connection, {
         event_key: eventKey,
         provider_message_id: event.providerMessageId,
+        notification_id: event.notificationId,
+        notification_attempt: event.notificationAttempt,
         status: event.status,
         provider_status_at: event.providerStatusAt,
         last_error: event.lastError,

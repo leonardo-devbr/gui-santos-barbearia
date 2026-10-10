@@ -669,6 +669,24 @@ describe('agendamentos com MySQL', () => {
 })
 
 describe('fila de avisos do WhatsApp com MySQL', () => {
+  it('compara os identificadores opacos da Meta com diferenciação de maiúsculas', async () => {
+    const [columns] = await applicationPool.execute<
+      Array<RowDataPacket & { tableName: string; collationName: string }>
+    >(
+      `SELECT TABLE_NAME AS tableName, COLLATION_NAME AS collationName
+       FROM information_schema.columns
+       WHERE table_schema = DATABASE()
+         AND column_name = 'provider_message_id'
+         AND table_name IN ('whatsapp_notifications', 'whatsapp_webhook_status_events')
+       ORDER BY table_name`,
+    )
+
+    expect(columns).toEqual([
+      { tableName: 'whatsapp_notifications', collationName: 'ascii_bin' },
+      { tableName: 'whatsapp_webhook_status_events', collationName: 'ascii_bin' },
+    ])
+  })
+
   it('preserva e reconcilia um webhook recebido antes de salvar o wamid', async () => {
     const notificationId = randomUUID()
     const providerMessageId = 'wamid.integration-race-12345678'
@@ -689,6 +707,8 @@ describe('fila de avisos do WhatsApp com MySQL', () => {
       whatsappWebhookModule.applyWhatsAppWebhookStatusEvents([
         {
           providerMessageId,
+          notificationId: null,
+          notificationAttempt: null,
           status: 'delivered',
           providerStatusAt,
           lastError: null,
@@ -1281,6 +1301,7 @@ describe('fila de avisos do WhatsApp com MySQL', () => {
         Response.json({ error: { code: 131000 } }, { status: 503 }),
       ),
     )
+    const startedAt = Date.now()
 
     await expect(
       whatsappNotificationModule.deliverWhatsAppNotification(notificationId),
@@ -1294,6 +1315,9 @@ describe('fila de avisos do WhatsApp com MySQL', () => {
     expect(retryRows[0].status).toBe('pending')
     expect(retryRows[0].attempts).toBe(1)
     expect(retryRows[0].next_attempt_at > retryRows[0].scheduled_for).toBe(true)
+    expect(Date.parse(`${retryRows[0].next_attempt_at.replace(' ', 'T')}Z`)).toBeGreaterThanOrEqual(
+      startedAt + 299_000,
+    )
 
     await applicationPool.execute<ResultSetHeader>(
       `UPDATE whatsapp_notifications
@@ -1312,6 +1336,140 @@ describe('fila de avisos do WhatsApp com MySQL', () => {
       [notificationId],
     )
     expect(recoveredRows[0]).toMatchObject({ status: 'pending', attempts: 2 })
+  })
+
+  it('usa o callback da Meta para confirmar um envio cuja resposta foi perdida', async () => {
+    const customerId = await createCustomer('whatsapp-resposta-perdida')
+    await enableCustomerWhatsApp(customerId)
+    const { queued } = await queueCreatedAppointment(customerId)
+    const notificationId = queued.immediateNotificationIds[0]
+    process.env.WHATSAPP_PROVIDER = 'meta'
+    process.env.WHATSAPP_GRAPH_API_VERSION = 'v23.0'
+    process.env.WHATSAPP_PHONE_NUMBER_ID = '1234567890'
+    process.env.WHATSAPP_ACCESS_TOKEN = 'token-de-teste-seguro'
+    const timeoutError = new Error('timeout simulado')
+    timeoutError.name = 'TimeoutError'
+    const fetchMock = vi.fn().mockRejectedValue(timeoutError)
+    vi.stubGlobal('fetch', fetchMock)
+    const startedAt = Date.now()
+
+    await expect(
+      whatsappNotificationModule.deliverWhatsAppNotification(notificationId),
+    ).resolves.toBe('retry_scheduled')
+    expect(fetchMock).toHaveBeenCalledOnce()
+
+    const [, requestOptions] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const requestBody = JSON.parse(String(requestOptions.body)) as Record<string, unknown>
+    expect(requestBody.biz_opaque_callback_data).toBe(`wn1:${notificationId}:1`)
+
+    const [waitingRows] = await applicationPool.execute<
+      Array<RowDataPacket & { status: string; attempts: number; next_attempt_at: string }>
+    >(
+      `SELECT status, attempts, next_attempt_at
+       FROM whatsapp_notifications
+       WHERE id = ?`,
+      [notificationId],
+    )
+    expect(waitingRows[0]).toMatchObject({ status: 'pending', attempts: 1 })
+    expect(Date.parse(`${waitingRows[0].next_attempt_at.replace(' ', 'T')}Z`)).toBeGreaterThanOrEqual(
+      startedAt + 299_000,
+    )
+
+    const providerMessageId = 'wamid.response-lost-12345678'
+    const webhookEvents = whatsappWebhookModule.extractWhatsAppWebhookStatusEvents({
+      object: 'whatsapp_business_account',
+      entry: [
+        {
+          changes: [
+            {
+              field: 'messages',
+              value: {
+                statuses: [
+                  {
+                    id: providerMessageId,
+                    status: 'delivered',
+                    timestamp: String(Math.floor(Date.now() / 1_000)),
+                    biz_opaque_callback_data: requestBody.biz_opaque_callback_data,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    })
+    expect(webhookEvents[0]).toMatchObject({
+      notificationId,
+      notificationAttempt: 1,
+    })
+    await expect(
+      whatsappWebhookModule.applyWhatsAppWebhookStatusEvents(webhookEvents),
+    ).resolves.toBe(1)
+    await expect(
+      whatsappWebhookModule.applyWhatsAppWebhookStatusEvents(webhookEvents),
+    ).resolves.toBe(0)
+
+    const [inboxCounts] = await applicationPool.execute<CountRow[]>(
+      `SELECT COUNT(*) AS total
+       FROM whatsapp_webhook_status_events
+       WHERE provider_message_id = ?`,
+      [providerMessageId],
+    )
+    expect(inboxCounts[0].total).toBe(1)
+
+    const [deliveredRows] = await applicationPool.execute<
+      Array<RowDataPacket & { status: string; provider_message_id: string | null }>
+    >(
+      `SELECT status, provider_message_id
+       FROM whatsapp_notifications
+       WHERE id = ?`,
+      [notificationId],
+    )
+    expect(deliveredRows[0]).toMatchObject({
+      status: 'delivered',
+      provider_message_id: providerMessageId,
+    })
+
+    const deliveredAt = webhookEvents[0].providerStatusAt
+    await expect(
+      whatsappWebhookModule.applyWhatsAppWebhookStatusEvents([
+        {
+          providerMessageId,
+          notificationId,
+          notificationAttempt: 1,
+          status: 'read',
+          providerStatusAt: new Date(deliveredAt.getTime() + 1_000),
+          lastError: null,
+        },
+      ]),
+    ).resolves.toBe(1)
+    for (const [status, offset] of [
+      ['delivered', 2_000],
+      ['sent', 3_000],
+    ] as const) {
+      await expect(
+        whatsappWebhookModule.applyWhatsAppWebhookStatusEvents([
+          {
+            providerMessageId,
+            notificationId,
+            notificationAttempt: 1,
+            status,
+            providerStatusAt: new Date(deliveredAt.getTime() + offset),
+            lastError: null,
+          },
+        ]),
+      ).resolves.toBe(0)
+    }
+    const [readRows] = await applicationPool.execute<Array<RowDataPacket & { status: string }>>(
+      'SELECT status FROM whatsapp_notifications WHERE id = ?',
+      [notificationId],
+    )
+    expect(readRows[0].status).toBe('read')
+
+    await expect(
+      whatsappNotificationModule.deliverWhatsAppNotification(notificationId),
+    ).resolves.toBeNull()
+    expect(fetchMock).toHaveBeenCalledOnce()
   })
 })
 

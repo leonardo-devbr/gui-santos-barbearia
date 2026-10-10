@@ -178,6 +178,7 @@ const reminderBackfillBatchSize = 500
 const maximumAttempts = 5
 const processingLeaseMinutes = 15
 const staleReminderMinutes = 15
+const ambiguousDeliveryGraceSeconds = 5 * 60
 
 function isDuplicateEntry(error: unknown) {
   return Boolean(
@@ -864,6 +865,7 @@ export async function deliverWhatsAppNotification(
       event: claim.event,
       audience: claim.audience,
       details: claim.details,
+      correlation: { notificationId: claim.id, attempt: claim.attempt },
     })
     const status = result.previewed ? 'previewed' : result.accepted ? 'accepted' : 'skipped'
     const updated = await updateDeliveredStatus(claim, status, result.messageId)
@@ -880,8 +882,18 @@ export async function deliverWhatsAppNotification(
   } catch (error) {
     const retryable = error instanceof WhatsAppDeliveryError && error.retryable
     const shouldRetry = retryable && claim.attempt < maximumAttempts
+    const retryDelaySeconds = getWhatsAppRetryDelaySeconds(claim.attempt)
+    const deliveryUnknown = error instanceof WhatsAppDeliveryError && error.deliveryUnknown
+    const retryAfterSeconds =
+      error instanceof WhatsAppDeliveryError ? (error.retryAfterSeconds ?? 0) : 0
     const nextAttempt = new Date(
-      Date.now() + getWhatsAppRetryDelaySeconds(claim.attempt) * 1000,
+      Date.now() +
+        Math.max(
+          retryDelaySeconds,
+          deliveryUnknown ? ambiguousDeliveryGraceSeconds : 0,
+          retryAfterSeconds,
+        ) *
+          1000,
     )
     const [result] = await getPool().execute<ResultSetHeader>(
       `UPDATE whatsapp_notifications

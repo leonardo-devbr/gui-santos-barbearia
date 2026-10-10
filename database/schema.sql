@@ -301,7 +301,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_notifications (
   scheduled_for DATETIME NOT NULL,
   next_attempt_at DATETIME NOT NULL,
   locked_at DATETIME NULL,
-  provider_message_id VARCHAR(512) NULL,
+  provider_message_id VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NULL,
   provider_status_at DATETIME NULL,
   last_error VARCHAR(500) NULL,
   dedupe_key VARCHAR(191) NOT NULL,
@@ -325,7 +325,9 @@ CREATE TABLE IF NOT EXISTS whatsapp_notifications (
 
 CREATE TABLE IF NOT EXISTS whatsapp_webhook_status_events (
   event_key CHAR(64) NOT NULL,
-  provider_message_id VARCHAR(512) NOT NULL,
+  provider_message_id VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  notification_id CHAR(36) NULL,
+  notification_attempt TINYINT UNSIGNED NULL,
   status ENUM('sent', 'delivered', 'read', 'failed') NOT NULL,
   provider_status_at DATETIME NOT NULL,
   last_error VARCHAR(500) NULL,
@@ -334,6 +336,8 @@ CREATE TABLE IF NOT EXISTS whatsapp_webhook_status_events (
   PRIMARY KEY (event_key),
   KEY whatsapp_webhook_status_events_message_index
     (provider_message_id, applied_at, provider_status_at),
+  KEY whatsapp_webhook_status_events_notification_index
+    (notification_id, applied_at, provider_status_at),
   KEY whatsapp_webhook_status_events_pending_index (applied_at, provider_status_at),
   KEY whatsapp_webhook_status_events_cleanup_index (received_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

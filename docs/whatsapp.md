@@ -93,6 +93,10 @@ https://SEU_DOMINIO/api/webhooks/whatsapp
 
 Use o valor de `WHATSAPP_WEBHOOK_VERIFY_TOKEN` na verificação e assine o campo `messages`. O servidor valida a assinatura HMAC do corpo bruto antes de interpretar o JSON. A resposta inicial da Cloud API fica como `accepted`; somente o webhook altera o registro para `sent`, `delivered`, `read` ou `failed`.
 
+Cada tentativa inclui uma referência interna opaca no campo `biz_opaque_callback_data`. Ela permite correlacionar o webhook com o item da fila sem enviar nome, telefone, e-mail ou outro dado pessoal nesse campo.
+
+Timeout, erro HTTP `5xx` e resposta `2xx` sem um identificador de mensagem válido são resultados ambíguos: a Meta pode ter aceitado o envio mesmo sem o servidor receber a confirmação. Nesses casos, a fila aguarda por pelo menos cinco minutos por um webhook antes de permitir uma nova tentativa.
+
 ## Processador e agendamento automático
 
 Configure um `CRON_SECRET` exclusivo com pelo menos 32 caracteres. O agendador deve fazer um `POST` a cada cinco minutos para:
@@ -114,6 +118,8 @@ npm run notifications:process
 ```
 
 O envio imediato após uma alteração é apenas uma otimização. A fila e o agendador são a garantia de processamento dos lembretes e novas tentativas.
+
+O processamento usa semântica *at-least-once*: prioriza não perder um aviso e reduz duplicidades por meio da correlação e do período de espera, mas uma falha de rede em um momento crítico ainda pode gerar uma duplicidade rara. O painel **Notificações** permite acompanhar tentativas, estados e falhas; o cron também reconcilia confirmações pendentes e executa as tentativas liberadas após a espera.
 
 ## Consentimento e segurança
 

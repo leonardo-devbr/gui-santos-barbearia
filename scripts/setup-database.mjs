@@ -208,6 +208,32 @@ async function hasWhatsappNotificationConstraint(name) {
   return Boolean(rows[0])
 }
 
+async function hasWhatsappWebhookStatusEventColumn(name) {
+  const [rows] = await databaseConnection.execute(
+    `SELECT 1
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE()
+       AND table_name = 'whatsapp_webhook_status_events'
+       AND column_name = ?
+     LIMIT 1`,
+    [name],
+  )
+  return Boolean(rows[0])
+}
+
+async function hasWhatsappWebhookStatusEventIndex(name) {
+  const [rows] = await databaseConnection.execute(
+    `SELECT 1
+     FROM information_schema.statistics
+     WHERE table_schema = DATABASE()
+       AND table_name = 'whatsapp_webhook_status_events'
+       AND index_name = ?
+     LIMIT 1`,
+    [name],
+  )
+  return Boolean(rows[0])
+}
+
 async function hasSchemaMigration(name) {
   const [rows] = await databaseConnection.execute(
     'SELECT 1 FROM schema_migrations WHERE name = ? LIMIT 1',
@@ -511,6 +537,59 @@ async function bindWhatsappNotificationsToBarbers() {
   ])
 }
 
+async function addWhatsappWebhookCorrelation() {
+  const migrationName = '20261009_whatsapp_webhook_correlation'
+
+  if (!(await hasWhatsappWebhookStatusEventColumn('notification_id'))) {
+    await databaseConnection.query(
+      `ALTER TABLE whatsapp_webhook_status_events
+       ADD COLUMN notification_id CHAR(36) NULL AFTER provider_message_id`,
+    )
+  }
+  if (!(await hasWhatsappWebhookStatusEventColumn('notification_attempt'))) {
+    await databaseConnection.query(
+      `ALTER TABLE whatsapp_webhook_status_events
+       ADD COLUMN notification_attempt TINYINT UNSIGNED NULL AFTER notification_id`,
+    )
+  }
+  if (
+    !(await hasWhatsappWebhookStatusEventIndex(
+      'whatsapp_webhook_status_events_notification_index',
+    ))
+  ) {
+    await databaseConnection.query(
+      `ALTER TABLE whatsapp_webhook_status_events
+       ADD INDEX whatsapp_webhook_status_events_notification_index
+         (notification_id, applied_at, provider_status_at)`,
+    )
+  }
+
+  if (!(await hasSchemaMigration(migrationName))) {
+    await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+      migrationName,
+    ])
+  }
+}
+
+async function migrateWhatsappProviderMessageIdsToAscii() {
+  const migrationName = '20261009_whatsapp_provider_message_ascii'
+  if (await hasSchemaMigration(migrationName)) return
+
+  await databaseConnection.query(
+    `ALTER TABLE whatsapp_notifications
+     MODIFY COLUMN provider_message_id
+       VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NULL`,
+  )
+  await databaseConnection.query(
+    `ALTER TABLE whatsapp_webhook_status_events
+     MODIFY COLUMN provider_message_id
+       VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL`,
+  )
+  await databaseConnection.execute('INSERT INTO schema_migrations (name) VALUES (?)', [
+    migrationName,
+  ])
+}
+
 async function updateDefaultBusinessLocation() {
   const migrationName = '20261005_update_default_business_location'
   if (await hasSchemaMigration(migrationName)) return
@@ -561,6 +640,8 @@ try {
   await addWhatsappContactPreferences()
   await addWhatsappNotificationQueue()
   await bindWhatsappNotificationsToBarbers()
+  await addWhatsappWebhookCorrelation()
+  await migrateWhatsappProviderMessageIdsToAscii()
   await updateDefaultBusinessLocation()
   console.log(`Banco ${databaseName} preparado com sucesso.`)
 } finally {

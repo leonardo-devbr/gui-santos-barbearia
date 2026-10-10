@@ -7,6 +7,8 @@ import {
   type AppointmentWhatsAppTemplate,
   type WhatsAppRecipientAudience,
 } from '@/lib/whatsapp-templates'
+import type { WhatsAppNotificationCorrelation } from '@/lib/whatsapp-correlation'
+import { createWhatsAppNotificationCallbackData } from '@/lib/whatsapp-correlation'
 
 export type WhatsAppProvider = 'disabled' | 'console' | 'meta'
 
@@ -28,6 +30,8 @@ export class WhatsAppConfigurationError extends Error {}
 
 export class WhatsAppDeliveryError extends Error {
   readonly retryable: boolean
+  readonly deliveryUnknown: boolean
+  readonly retryAfterSeconds?: number
   readonly statusCode?: number
   readonly providerCode?: number
 
@@ -35,12 +39,22 @@ export class WhatsAppDeliveryError extends Error {
     message: string,
     {
       retryable,
+      deliveryUnknown = false,
+      retryAfterSeconds,
       statusCode,
       providerCode,
-    }: { retryable: boolean; statusCode?: number; providerCode?: number },
+    }: {
+      retryable: boolean
+      deliveryUnknown?: boolean
+      retryAfterSeconds?: number
+      statusCode?: number
+      providerCode?: number
+    },
   ) {
     super(message)
     this.retryable = retryable
+    this.deliveryUnknown = deliveryUnknown
+    this.retryAfterSeconds = retryAfterSeconds
     this.statusCode = statusCode
     this.providerCode = providerCode
   }
@@ -73,6 +87,8 @@ type WhatsAppConfiguration = DisabledConfiguration | ConsoleConfiguration | Meta
 const defaultTemplateName = 'appointment_notification'
 const defaultTemplateLanguage = 'pt_BR'
 const defaultTimeoutMs = 10_000
+const transientProviderCodes = new Set([130429, 131000, 131016, 131056])
+const maximumRetryAfterSeconds = 60 * 60
 
 function readProvider(): WhatsAppProvider {
   const value = process.env.WHATSAPP_PROVIDER?.trim().toLowerCase()
@@ -183,6 +199,17 @@ function getProviderCode(payload: unknown) {
   return typeof error.code === 'number' && Number.isInteger(error.code) ? error.code : undefined
 }
 
+function getRetryAfterSeconds(response: Response) {
+  const value = response.headers.get('retry-after')?.trim()
+  if (!value) return undefined
+
+  const numericSeconds = /^\d+$/.test(value) ? Number(value) : undefined
+  const dateSeconds = numericSeconds === undefined ? (Date.parse(value) - Date.now()) / 1_000 : undefined
+  const seconds = numericSeconds ?? dateSeconds
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return undefined
+  return Math.min(Math.ceil(seconds), maximumRetryAfterSeconds)
+}
+
 async function readJsonSafely(response: Response): Promise<unknown> {
   try {
     return await response.json()
@@ -213,10 +240,12 @@ async function deliverWithMeta({
   to,
   template,
   configuration,
+  callbackData,
 }: {
   to: string
   template: AppointmentWhatsAppTemplate
   configuration: MetaConfiguration
+  callbackData?: string
 }): Promise<WhatsAppDeliveryResult> {
   const maskedRecipient = maskWhatsAppNumber(to)
   const endpoint = `https://graph.facebook.com/${configuration.graphApiVersion}/${configuration.phoneNumberId}/messages`
@@ -234,6 +263,7 @@ async function deliverWithMeta({
         recipient_type: 'individual',
         to,
         type: 'template',
+        ...(callbackData ? { biz_opaque_callback_data: callbackData } : {}),
         template: {
           name: template.name,
           language: { code: template.languageCode },
@@ -250,22 +280,28 @@ async function deliverWithMeta({
       timedOut
         ? 'O envio pelo WhatsApp excedeu o tempo limite.'
         : 'Não foi possível se comunicar com o provedor do WhatsApp.',
-      { retryable: true },
+      { retryable: true, deliveryUnknown: true },
     )
   }
 
   const payload = await readJsonSafely(response)
 
   if (!response.ok) {
-    const retryable = response.status === 429 || response.status >= 500
+    const providerCode = getProviderCode(payload)
+    const retryable =
+      response.status === 429 ||
+      response.status >= 500 ||
+      (providerCode !== undefined && transientProviderCodes.has(providerCode))
     throw new WhatsAppDeliveryError(
       retryable
         ? 'O provedor do WhatsApp está temporariamente indisponível.'
         : 'O provedor do WhatsApp rejeitou o envio.',
       {
         retryable,
+        deliveryUnknown: response.status >= 500,
+        retryAfterSeconds: retryable ? getRetryAfterSeconds(response) : undefined,
         statusCode: response.status,
-        providerCode: getProviderCode(payload),
+        providerCode,
       },
     )
   }
@@ -274,6 +310,7 @@ async function deliverWithMeta({
   if (!messageId) {
     throw new WhatsAppDeliveryError('O provedor do WhatsApp retornou uma resposta inválida.', {
       retryable: true,
+      deliveryUnknown: true,
       statusCode: response.status,
     })
   }
@@ -291,9 +328,11 @@ async function deliverWithMeta({
 export async function sendWhatsAppTemplate({
   to,
   template,
+  correlation,
 }: {
   to: string
   template: AppointmentWhatsAppTemplate
+  correlation?: WhatsAppNotificationCorrelation
 }): Promise<WhatsAppDeliveryResult> {
   const configuration = getWhatsAppConfiguration()
   const maskedRecipient = maskWhatsAppNumber(to)
@@ -327,6 +366,12 @@ export async function sendWhatsAppTemplate({
     to: normalizedRecipient,
     template,
     configuration,
+    callbackData: correlation
+      ? createWhatsAppNotificationCallbackData(
+          correlation.notificationId,
+          correlation.attempt,
+        )
+      : undefined,
   })
 }
 
@@ -335,11 +380,13 @@ export async function sendAppointmentWhatsApp({
   event,
   audience,
   details,
+  correlation,
 }: {
   to: string
   event: AppointmentWhatsAppEvent
   audience: WhatsAppRecipientAudience
   details: AppointmentWhatsAppDetails
+  correlation?: WhatsAppNotificationCorrelation
 }): Promise<WhatsAppDeliveryResult> {
   const configuration = getWhatsAppConfiguration()
 
@@ -361,5 +408,5 @@ export async function sendAppointmentWhatsApp({
     languageCode: configuration.languageCode,
   })
 
-  return sendWhatsAppTemplate({ to, template })
+  return sendWhatsAppTemplate({ to, template, correlation })
 }
