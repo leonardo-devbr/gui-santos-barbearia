@@ -1,16 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { after, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import type { ResultSetHeader, RowDataPacket } from 'mysql2/promise'
 import { errorResponse, internalErrorResponse, readJsonObject } from '@/lib/api'
-import { createToken, hashPassword, hashToken } from '@/lib/auth'
+import { hashPassword } from '@/lib/auth'
 import { withTransaction } from '@/lib/db'
-import {
-  canExposeDevelopmentVerificationUrl,
-  cleanupExpiredEmailVerifications,
-  createEmailVerificationUrl,
-  EMAIL_VERIFICATION_MAX_AGE_MS,
-  sendEmailVerification,
-} from '@/lib/email-verification'
 import {
   consumeRateLimits,
   getClientIdentifier,
@@ -28,9 +21,6 @@ type RegistrationField = 'name' | 'phone' | 'email' | 'password'
 interface ExistingCustomerRow extends RowDataPacket {
   id: string
   email: string
-  email_verified_at: string | null
-  pending_email: string | null
-  registration_token_hash: string | null
 }
 
 interface CreatedCustomer {
@@ -39,8 +29,7 @@ interface CreatedCustomer {
   email: string
 }
 
-const successMessage =
-  'Se o endereço puder ser cadastrado, enviaremos um link para confirmar e ativar a conta.'
+const successMessage = 'Conta criada com sucesso! Você já pode entrar.'
 
 function validateRegistration(body: Record<string, unknown>) {
   const name = typeof body.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : ''
@@ -93,88 +82,39 @@ export async function POST(request: Request) {
     if (!rateLimit.allowed) return rateLimitResponse(rateLimit.retryAfter)
 
     const passwordHash = await hashPassword(data.password)
-    const token = createToken()
-    const tokenHash = hashToken(token)
-    const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_MAX_AGE_MS)
-    const verificationUrl = createEmailVerificationUrl(token, request.url)
 
     const customer = await withTransaction<CreatedCustomer | null>(async (connection) => {
-      await cleanupExpiredEmailVerifications(connection)
-
       const [existingCustomers] = await connection.execute<ExistingCustomerRow[]>(
-        `SELECT
-           customers.id,
-           customers.email,
-           customers.email_verified_at,
-           customers.pending_email,
-           email_verification_tokens.token_hash AS registration_token_hash
+        `SELECT id, email, email_verified_at
          FROM customers
-         LEFT JOIN email_verification_tokens
-           ON email_verification_tokens.customer_id = customers.id
-          AND email_verification_tokens.purpose = 'registration'
-         WHERE customers.email = ? OR customers.pending_email = ?
+         WHERE email = ?
          FOR UPDATE`,
-        [data.email, data.email],
+        [data.email],
       )
-      const currentAccount = existingCustomers.find((row) => row.email === data.email)
-      const pendingOwner = existingCustomers.find((row) => row.pending_email === data.email)
+      const currentAccount = existingCustomers[0]
 
-      if (
-        pendingOwner ||
-        currentAccount?.email_verified_at ||
-        (currentAccount && !currentAccount.registration_token_hash)
-      ) {
-        return null
-      }
-      if (currentAccount) {
-        await connection.execute<ResultSetHeader>('DELETE FROM customers WHERE id = ?', [
-          currentAccount.id,
-        ])
-      }
+      if (currentAccount) return null
 
       const id = randomUUID()
       await connection.execute<ResultSetHeader>(
-        'INSERT INTO customers (id, name, phone, email, password_hash) VALUES (?, ?, ?, ?, ?)',
+        `INSERT INTO customers (id, name, phone, email, email_verified_at, password_hash)
+         VALUES (?, ?, ?, ?, UTC_TIMESTAMP(), ?)`,
         [id, data.name, data.phone, data.email, passwordHash],
-      )
-      await connection.execute<ResultSetHeader>(
-        `INSERT INTO email_verification_tokens
-          (token_hash, customer_id, email, purpose, expires_at)
-         VALUES (?, ?, ?, 'registration', ?)`,
-        [tokenHash, id, data.email, expiresAt],
       )
 
       return { id, name: data.name, email: data.email }
     })
 
-    if (customer) {
-      after(async () => {
-        try {
-          await sendEmailVerification({
-            customerName: customer.name,
-            email: customer.email,
-            verificationUrl,
-            purpose: 'registration',
-          })
-        } catch (error) {
-          console.error('Falha ao enviar confirmação de cadastro:', error)
-        }
-      })
-    }
-
     return NextResponse.json(
       {
         message: successMessage,
-        developmentVerificationUrl:
-          customer && canExposeDevelopmentVerificationUrl(request.url)
-            ? verificationUrl
-            : undefined,
+        accountCreated: Boolean(customer),
       },
       { status: 201 },
     )
   } catch (error) {
     if (isDuplicateEntry(error)) {
-      return NextResponse.json({ message: successMessage }, { status: 201 })
+      return errorResponse('Este e-mail já está cadastrado.', 409)
     }
 
     return internalErrorResponse(error)

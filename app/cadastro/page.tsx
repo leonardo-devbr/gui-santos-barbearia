@@ -26,7 +26,6 @@ type SignupErrors = Partial<Record<SignupField, string>>
 interface SignupResponse {
   message?: string
   errors?: SignupErrors
-  developmentVerificationUrl?: string
 }
 
 function validateSignup(formData: FormData) {
@@ -72,7 +71,6 @@ export default function SignupPage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCompleted, setIsCompleted] = useState(false)
-  const [developmentVerificationUrl, setDevelopmentVerificationUrl] = useState<string | null>(null)
 
   function clearError(field: SignupField) {
     setErrors((current) => {
@@ -114,8 +112,7 @@ export default function SignupPage() {
         return
       }
 
-      toast.success('Confira seu e-mail para ativar a conta.')
-      setDevelopmentVerificationUrl(result?.developmentVerificationUrl ?? null)
+      toast.success('Conta criada com sucesso!')
       setIsCompleted(true)
     } catch {
       setSubmitError('Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.')
@@ -132,21 +129,11 @@ export default function SignupPage() {
             <CheckCircle2 className="size-6" aria-hidden="true" />
           </div>
           <div className="flex flex-col gap-2">
-            <h1 className="font-serif text-3xl text-foreground">Confirme seu e-mail</h1>
+            <h1 className="font-serif text-3xl text-foreground">Conta criada com sucesso!</h1>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              Se o endereço puder ser cadastrado, você receberá um link válido por 24 horas para ativar a conta.
+              Sua conta foi criada e já está ativa. Você já pode entrar e agendar seu próximo horário.
             </p>
           </div>
-          {developmentVerificationUrl && (
-            <Button
-              render={<Link href={developmentVerificationUrl} />}
-              nativeButton={false}
-              size="lg"
-              className="w-full"
-            >
-              Abrir link de desenvolvimento
-            </Button>
-          )}
           <Button render={<Link href="/login" />} nativeButton={false} size="lg" className="w-full">
             Ir para o login
           </Button>

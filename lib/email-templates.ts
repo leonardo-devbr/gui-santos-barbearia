@@ -161,3 +161,44 @@ export function createAppointmentEmail(
 
   return { subject, text, html }
 }
+
+export function createBarberAppointmentEmail(
+  type: Extract<AppointmentEmailType, 'appointment_created' | 'appointment_cancelled' | 'appointment_reminder'>,
+  details: AppointmentEmailDetails,
+): EmailTemplate {
+  const titles = {
+    appointment_created: 'Novo agendamento recebido',
+    appointment_cancelled: 'Agendamento cancelado',
+    appointment_reminder: 'Próximo atendimento',
+  } as const
+  const intros = {
+    appointment_created: `Olá, ${details.barberName}. Um novo horário foi reservado para você.`,
+    appointment_cancelled: `Olá, ${details.barberName}. Um atendimento da sua agenda foi cancelado.`,
+    appointment_reminder: `Olá, ${details.barberName}. Este é um lembrete do seu próximo atendimento.`,
+  } as const
+  const title = titles[type]
+  const subject = `${title} | ${details.businessName}`
+  const summary = `${details.serviceName} com ${details.customerName}, em ${details.dateLabel} às ${details.time}`
+  const text = `${intros[type]}
+
+${summary}.
+Valor: ${details.priceLabel}.
+
+Acesse o painel da barbearia: ${details.appointmentsUrl}`
+  const content = `<div style="margin:20px 0;padding:18px;border-radius:10px;background:#222;color:#e8e8e8;line-height:1.7">
+    <strong style="color:#fff">${escapeHtml(details.serviceName)}</strong><br>
+    Cliente: ${escapeHtml(details.customerName)}<br>
+    Data: ${escapeHtml(details.dateLabel)}<br>
+    Horário: ${escapeHtml(details.time)}<br>
+    Valor: ${escapeHtml(details.priceLabel)}
+  </div>`
+  const html = renderEmail({
+    title,
+    intro: intros[type],
+    content,
+    actionLabel: 'Abrir painel da barbearia',
+    actionUrl: details.appointmentsUrl,
+    businessName: details.businessName,
+  })
+  return { subject, text, html }
+}

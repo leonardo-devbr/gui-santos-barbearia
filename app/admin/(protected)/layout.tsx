@@ -11,6 +11,7 @@ import {
   UsersRound,
 } from 'lucide-react'
 import { AdminLogoutButton } from '@/components/admin/admin-logout-button'
+import { AdminNotifications } from '@/components/admin/admin-notifications'
 import { getAuthenticatedStaff } from '@/lib/admin-auth'
 
 export default async function ProtectedAdminLayout({ children }: { children: React.ReactNode }) {
@@ -91,6 +92,7 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
           </nav>
 
           <div className="flex items-center gap-2">
+            <AdminNotifications />
             <span className="hidden text-sm text-muted-foreground md:inline">{staff.name}</span>
             <AdminLogoutButton />
           </div>

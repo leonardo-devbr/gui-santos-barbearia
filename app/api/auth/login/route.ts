@@ -46,10 +46,6 @@ export async function POST(request: Request) {
     if (authentication === 'invalid') {
       return errorResponse('E-mail ou senha incorretos.', 401)
     }
-    if (authentication === 'unverified') {
-      return errorResponse('Confirme seu e-mail antes de entrar.', 403)
-    }
-
     await resetRateLimit('customer-login-email', email)
     return NextResponse.json({ message: 'Login realizado com sucesso.' })
   } catch (error) {

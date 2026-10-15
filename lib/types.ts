@@ -131,3 +131,15 @@ export interface CustomerProfile {
   beardStyle: string
   notes: string
 }
+
+export type StaffNotificationType = 'appointment_created' | 'appointment_cancelled' | 'appointment_reminder'
+
+export interface StaffNotification {
+  id: string
+  appointmentId: string | null
+  type: StaffNotificationType
+  title: string
+  message: string
+  readAt: string | null
+  createdAt: string
+}

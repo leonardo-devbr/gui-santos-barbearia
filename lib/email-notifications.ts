@@ -8,9 +8,11 @@ import { addDaysToIsoDate, getTodayInSaoPaulo } from '@/lib/date'
 import { getPublicAppUrl, sendEmail } from '@/lib/email'
 import {
   createAppointmentEmail,
+  createBarberAppointmentEmail,
   type AppointmentEmailType,
 } from '@/lib/email-templates'
 import { formatDateLong, formatPrice } from '@/lib/format'
+import { createStaffAppointmentNotification } from '@/lib/staff-notifications'
 
 interface AppointmentNotificationRow extends RowDataPacket {
   id: string
@@ -22,6 +24,8 @@ interface AppointmentNotificationRow extends RowDataPacket {
   appointment_date: string
   appointment_time: string
   price: number
+  barber_email: string | null
+  staff_user_id: string | null
 }
 
 interface PendingNotificationRow extends RowDataPacket {
@@ -63,6 +67,8 @@ async function createNotification(
       customers.email AS customer_email,
       services.name AS service_name,
       barbers.name AS barber_name,
+      staff_users.email AS barber_email,
+      staff_users.id AS staff_user_id,
       appointments.appointment_date,
       appointments.appointment_time,
       appointments.price
@@ -70,6 +76,7 @@ async function createNotification(
     INNER JOIN customers ON customers.id = appointments.customer_id
     INNER JOIN services ON services.id = appointments.service_id
     INNER JOIN barbers ON barbers.id = appointments.barber_id
+    LEFT JOIN staff_users ON staff_users.barber_id = appointments.barber_id AND staff_users.role = 'barber' AND staff_users.is_active = TRUE
     WHERE appointments.id = ?
     LIMIT 1`,
     [appointmentId],
@@ -170,8 +177,72 @@ export async function deliverEmailNotification(id: string) {
 
 export async function notifyAppointment(appointmentId: string, type: AppointmentEmailType) {
   try {
-    const notificationId = await createNotification(appointmentId, type)
-    return notificationId ? deliverEmailNotification(notificationId) : false
+    const customerNotificationId = await createNotification(appointmentId, type)
+    const customerDelivered = customerNotificationId
+      ? await deliverEmailNotification(customerNotificationId)
+      : false
+
+    const [rows] = await getPool().execute<AppointmentNotificationRow[]>(
+      `SELECT
+        appointments.id,
+        appointments.customer_id,
+        customers.name AS customer_name,
+        customers.email AS customer_email,
+        services.name AS service_name,
+        barbers.name AS barber_name,
+        staff_users.email AS barber_email,
+        staff_users.id AS staff_user_id,
+        appointments.appointment_date,
+        appointments.appointment_time,
+        appointments.price
+       FROM appointments
+       INNER JOIN customers ON customers.id = appointments.customer_id
+       INNER JOIN services ON services.id = appointments.service_id
+       INNER JOIN barbers ON barbers.id = appointments.barber_id
+       LEFT JOIN staff_users ON staff_users.barber_id = appointments.barber_id
+         AND staff_users.role = 'barber' AND staff_users.is_active = TRUE
+       WHERE appointments.id = ?
+       LIMIT 1`,
+      [appointmentId],
+    )
+    const appointment = rows[0]
+
+    let barberDelivered = false
+    if (appointment?.barber_email) {
+      const { settings } = await getBusinessConfiguration()
+      const template = createBarberAppointmentEmail(type as Extract<AppointmentEmailType, 'appointment_created' | 'appointment_cancelled' | 'appointment_reminder'>, {
+        customerName: appointment.customer_name,
+        serviceName: appointment.service_name,
+        barberName: appointment.barber_name,
+        dateLabel: formatDateLong(appointment.appointment_date),
+        time: appointment.appointment_time.slice(0, 5),
+        priceLabel: formatPrice(appointment.price),
+        businessName: settings.name,
+        appointmentsUrl: `${getPublicAppUrl()}/admin/agendamentos`,
+      })
+      const barberEmailId = randomUUID()
+      try {
+        await getPool().execute<ResultSetHeader>(
+          `INSERT INTO email_notifications
+            (id, customer_id, appointment_id, notification_type, recipient_email, recipient_name, subject, text_body, html_body, scheduled_for, dedupe_key)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), ?)`,
+          [
+            barberEmailId, appointment.customer_id, appointment.id, type, appointment.barber_email, appointment.barber_name,
+            template.subject, template.text, template.html, `barber-email:${appointment.id}:${type}`,
+          ],
+        )
+        barberDelivered = await deliverEmailNotification(barberEmailId)
+      } catch (error) {
+        if (!isDuplicateEntry(error)) throw error
+      }
+    }
+
+    if (type === 'appointment_created' || type === 'appointment_cancelled') {
+      try { await createStaffAppointmentNotification(appointmentId, type) }
+      catch (error) { console.error(`Falha ao criar notificação interna de ${type}:`, error) }
+    }
+
+    return customerDelivered || barberDelivered
   } catch (error) {
     console.error(`Falha ao preparar notificação de ${type}:`, error)
     return false
@@ -198,6 +269,13 @@ export async function processAppointmentNotifications() {
      WHERE status <> 'processing'
        AND created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${NOTIFICATION_RETENTION_DAYS} DAY)
      ORDER BY created_at ASC
+     LIMIT ${NOTIFICATION_CLEANUP_BATCH_SIZE}`,
+  )
+
+  await pool.execute<ResultSetHeader>(
+    `DELETE FROM staff_notifications
+     WHERE read_at IS NOT NULL
+       AND created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ${NOTIFICATION_RETENTION_DAYS} DAY)
      LIMIT ${NOTIFICATION_CLEANUP_BATCH_SIZE}`,
   )
 

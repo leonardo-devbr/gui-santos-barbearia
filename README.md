@@ -168,7 +168,7 @@ Para repetir os testes automaticamente durante o desenvolvimento:
 npm run test:watch
 ```
 
-A suíte cobre validações, datas, templates de e-mail, limites de corpo da API, a confirmação de e-mail no navegador e as regras críticas de agendamento. Os testes de integração criam um banco temporário com o prefixo `gui_santos_barbearia_test_`, aplicam o schema real e removem esse banco ao terminar. Eles nunca reutilizam nem apagam o banco definido em `MYSQL_DATABASE` e, por segurança, só executam essa criação em um MySQL local.
+A suíte cobre validações, datas, templates de e-mail, limites de corpo da API, a criação de conta no navegador e as regras críticas de agendamento. Os testes de integração criam um banco temporário com o prefixo `gui_santos_barbearia_test_`, aplicam o schema real e removem esse banco ao terminar. Eles nunca reutilizam nem apagam o banco definido em `MYSQL_DATABASE` e, por segurança, só executam essa criação em um MySQL local.
 
 O usuário configurado precisa ter permissão para criar e remover o banco temporário. Se a aplicação usa uma conta restrita, defina `MYSQL_SETUP_USER` e `MYSQL_SETUP_PASSWORD` somente no ambiente local de testes. Nunca execute a suíte com credenciais de produção.
 
@@ -257,7 +257,7 @@ Todas as requisições e respostas usam JSON. Em erros, a API responde com um st
 | `POST` | `/api/auth/reset-password` | `{ "token", "password" }` | Consome um token válido e altera a senha. |
 | `POST` | `/api/auth/verify-email` | `{ "token" }` | Ativa um cadastro ou confirma a troca de e-mail. |
 
-O link de recuperação aponta para `/redefinir-senha?token=TOKEN`, expira em uma hora e é invalidado após o uso. A confirmação de e-mail aponta para `/verificar-email?token=TOKEN` e expira em 24 horas. Ambos os tokens são aleatórios e armazenados somente como hash.
+O link de recuperação aponta para `/redefinir-senha?token=TOKEN`, expira em uma hora e é invalidado após o uso. A criação de conta aponta para `/verificar-email?token=TOKEN` e expira em 24 horas. Ambos os tokens são aleatórios e armazenados somente como hash.
 
 ### Agendamentos
 
@@ -362,3 +362,17 @@ Ao solicitar a troca do e-mail, envie também `currentPassword`. O endereço atu
 - Verificar se o agendamento pertence ao cliente antes de remarcar ou cancelar.
 - Usar transação e bloqueio adequado ao confirmar horários, considerando a duração do serviço.
 - Retornar `401` para sessão ausente/inválida, `403` para acesso indevido, `404` para recurso inexistente, `409` para conflito de horário e `422` para dados inválidos.
+
+
+## Notificações de agendamento
+
+O fluxo de notificações da equipe funciona assim:
+
+- **Novo agendamento:** o cliente recebe e-mail de confirmação; o barbeiro responsável recebe e-mail com os dados do atendimento e uma notificação no sino do painel.
+- **Cancelamento:** cliente e barbeiro recebem e-mail; o barbeiro recebe também uma notificação interna.
+- **Sino do painel:** notificações são consultadas pela API a cada 15 segundos, exibem contador de não lidas e podem ser marcadas individualmente ou todas de uma vez.
+- **Banco:** `staff_notifications` guarda as notificações internas e é criada automaticamente por `npm run db:setup`.
+
+Para que o barbeiro receba as mensagens, a conta em `staff_users` precisa estar vinculada ao respectivo `barber_id` e ter um e-mail válido. O SMTP precisa estar configurado normalmente pelas variáveis já existentes do projeto.
+
+> O projeto atual ainda não possui uma ação de remarcação de agendamento. Quando essa funcionalidade for adicionada, o mesmo mecanismo pode disparar o evento `appointment_rescheduled` para cliente e barbeiro.

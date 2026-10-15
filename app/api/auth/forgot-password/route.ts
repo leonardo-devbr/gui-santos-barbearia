@@ -73,7 +73,7 @@ export async function POST(request: Request) {
       const [rows] = await connection.execute<CustomerIdRow[]>(
         `SELECT id, name, email
          FROM customers
-         WHERE email = ? AND email_verified_at IS NOT NULL
+         WHERE email = ?
          LIMIT 1
          FOR UPDATE`,
         [email],

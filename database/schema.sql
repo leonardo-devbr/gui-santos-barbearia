@@ -218,6 +218,26 @@ CREATE TABLE IF NOT EXISTS schedule_blocks (
   )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE IF NOT EXISTS staff_notifications (
+  id CHAR(36) NOT NULL,
+  staff_user_id CHAR(36) NOT NULL,
+  appointment_id CHAR(36) NULL,
+  notification_type ENUM('appointment_created', 'appointment_cancelled', 'appointment_reminder') NOT NULL,
+  title VARCHAR(160) NOT NULL,
+  message VARCHAR(500) NOT NULL,
+  read_at DATETIME NULL,
+  dedupe_key VARCHAR(180) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY staff_notifications_dedupe_unique (dedupe_key),
+  KEY staff_notifications_staff_unread_index (staff_user_id, read_at, created_at),
+  KEY staff_notifications_appointment_index (appointment_id),
+  CONSTRAINT staff_notifications_staff_user_id_fk
+    FOREIGN KEY (staff_user_id) REFERENCES staff_users (id) ON DELETE CASCADE,
+  CONSTRAINT staff_notifications_appointment_id_fk
+    FOREIGN KEY (appointment_id) REFERENCES appointments (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE IF NOT EXISTS email_notifications (
   id CHAR(36) NOT NULL,
   customer_id CHAR(36) NOT NULL,

@@ -85,7 +85,7 @@ export async function authenticateCustomer(email: string, password: string) {
   const token = createToken()
   const tokenHash = hashToken(token)
   const expiresAt = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000)
-  const result = await withTransaction<'invalid' | 'unverified' | 'authenticated'>(
+  const result = await withTransaction<'invalid' | 'authenticated'>(
     async (connection) => {
       const [rows] = await connection.execute<LoginCredentialRow[]>(
         `SELECT id, password_hash, email_verified_at
@@ -102,14 +102,6 @@ export async function authenticateCustomer(email: string, password: string) {
       )
 
       if (!customer || !passwordMatches) return 'invalid'
-      if (
-        !customer.email_verified_at &&
-        !(process.env.NODE_ENV === 'development' &&
-          process.env.DEV_ALLOW_UNVERIFIED_LOGIN === 'true')
-      ) {
-        return 'unverified'
-      }
-
       await connection.execute('DELETE FROM sessions WHERE expires_at <= UTC_TIMESTAMP()')
       if (previousToken) {
         await connection.execute('DELETE FROM sessions WHERE token_hash = ?', [
